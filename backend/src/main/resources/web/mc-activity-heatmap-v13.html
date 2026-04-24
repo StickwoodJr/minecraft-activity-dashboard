@@ -183,6 +183,8 @@
       .player-table td{padding:var(--space-3) var(--space-4);font-size:var(--text-sm);
         border-bottom:1px solid oklch(from var(--color-text) l c h/0.05);}
       .player-table tr:last-child td{border-bottom:none;}
+      .player-table tr { transition: background var(--transition); }
+      .player-table tr:hover td { background: var(--color-surface-dynamic); }
       .player-color-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:var(--space-2);vertical-align:middle;}
       .rank-badge{display:inline-flex;align-items:center;justify-content:center;
         width:20px;height:20px;border-radius:var(--radius-full);font-size:10px;font-weight:700;
@@ -1076,6 +1078,13 @@
 
       window.addEventListener('keydown', e => {
         if (e.key === 'Escape') closePlayerModal();
+      });
+
+      // Close modal on background click
+      document.getElementById('playerModal').addEventListener('click', (e) => {
+        if (e.target.id === 'playerModal') {
+          closePlayerModal();
+        }
       });
 
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
