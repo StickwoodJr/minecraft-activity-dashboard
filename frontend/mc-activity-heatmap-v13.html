@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MC Server — Player Activity Heatmap</title>
+    <title>{{TAB_TITLE}}</title>
+    <link rel="icon" href="/favicon.png">
     <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/skinview3d@3.0.0/bundles/skinview3d.bundle.js"></script>
@@ -98,158 +99,79 @@
       .day-label-item{font-size:clamp(11px, calc(var(--cell-size) * 0.34), 15px);line-height:1;color:var(--color-text-muted);font-weight:600;text-align:center;}
       .heatmap-grid{display:grid;grid-template-columns:32px repeat(7, 1fr);gap:var(--cell-gap);width:100%;min-width:0;align-items:start;}
       .week-label{width:32px;height:auto;aspect-ratio:1/1;display:flex;align-items:center;justify-content:flex-start;font-size:clamp(10px, calc(var(--cell-size) * 0.30), 13px);color:var(--color-text-muted);font-weight:600;white-space:nowrap;overflow:hidden;}
-      .day-cell{width:100%;aspect-ratio:1/1;border-radius:max(5px, calc(var(--cell-size) * 0.12));background:var(--cell-empty);
-        cursor:pointer;transition:transform var(--transition),box-shadow var(--transition),outline var(--transition);}
-      .day-cell:hover{transform:scale(1.15);box-shadow:var(--shadow-md);z-index:10;}
-      .day-cell.selected{outline:2px solid var(--color-primary);outline-offset:2px;transform:scale(1.1);}
-      .day-cell.lv1{background:var(--cell-1);}
-      .day-cell.lv2{background:var(--cell-2);}
-      .day-cell.lv3{background:var(--cell-3);}
-      .day-cell.lv4{background:var(--cell-4);}
-      .day-cell.lv5{background:var(--cell-5);}
-      .day-cell.future{background:transparent;cursor:default;pointer-events:none;}
-      .month-label-item{font-size:var(--text-xs);color:var(--color-text-muted);font-weight:500;}
+      .day-cell{width:100%;aspect-ratio:1/1;border-radius:var(--radius-sm);background:var(--cell-empty);
+        transition:transform 150ms ease, background 150ms ease;cursor:pointer;position:relative;}
+      .day-cell:hover{transform:scale(1.08);z-index:10;box-shadow:var(--shadow-md);filter:brightness(1.1);}
+      .day-cell.active{outline:2px solid var(--color-primary);outline-offset:2px;}
+      .day-cell.today{outline:2px solid var(--color-text);outline-offset:2px;}
 
-      .legend-row{display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-2);justify-content:center;padding-bottom:0;width:100%;}
-      .legend-label{font-size:clamp(12px, calc(var(--cell-size) * 0.34), 15px);color:var(--color-text-muted);font-weight:600;}
-      .legend-cells{display:flex;gap:calc(var(--cell-gap) * 0.9);}
-      .legend-cell{width:calc(var(--cell-size) * 0.72);height:calc(var(--cell-size) * 0.72);border-radius:max(4px, calc(var(--cell-size) * 0.12));}
+      .heatmap-legend{display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-4);justify-content:flex-end;width:100%;}
+      .legend-label{font-size:11px;color:var(--color-text-faint);text-transform:uppercase;letter-spacing:.05em;}
+      .legend-cells{display:flex;gap:4px;}
+      .legend-cell{width:12px;height:12px;border-radius:2px;}
 
-      /* Day detail panel */
-      .day-panel{
-        background:var(--color-surface-2);
-        border:1px solid oklch(from var(--color-text) l c h/0.08);
-        border-radius:var(--radius-xl);
-        display:flex;flex-direction:column;gap:var(--space-4);
-        opacity:0;transform:translateX(24px) scale(0.98);
-        transition:opacity 320ms cubic-bezier(0.16,1,0.3,1),
-                   transform 320ms cubic-bezier(0.16,1,0.3,1),
-                   height 320ms cubic-bezier(0.16,1,0.3,1),
-                   padding 320ms cubic-bezier(0.16,1,0.3,1),
-                   border-width 320ms ease;
-        pointer-events:none;min-width:0;
-        height:0;overflow:hidden;padding:0;border-width:0;
-      }
-      .day-panel.visible{
-        opacity:1;transform:translateX(0) scale(1);
-        pointer-events:auto;height:100%;overflow:visible;
-        padding:var(--space-5);border-width:1px;box-sizing:border-box;
-      }
-      .day-panel.closing{
-        opacity:0;transform:translateX(24px) scale(0.97);
-        pointer-events:none;
-        /* Preserve layout so height doesn't snap to 0 while animating out */
-        height:100%;overflow:visible;padding:var(--space-5);border-width:1px;box-sizing:border-box;
-      }
-      .day-panel-header{display:flex;justify-content:space-between;align-items:flex-start;}
-      .day-panel-title{font-size:var(--text-sm);font-weight:600;}
-      .day-panel-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin-top:2px;}
-      .pie-wrap{position:relative;width:100%;max-width:320px;margin-inline:auto;display:flex;align-items:center;}
-      .pie-wrap canvas{width:100%!important;height:auto!important;}
-      .pie-legend{display:flex;flex-direction:column;gap:var(--space-2);margin-top:var(--space-3);}
-      .pie-legend-item{display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs);}
-      .pie-legend-name{display:flex;align-items:center;gap:var(--space-2);color:var(--color-text-muted);}
-      .pie-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
-      .pie-legend-val{font-weight:500;color:var(--color-text);}
+      /* Player Table */
+      .table-container{width:100%;overflow-x:auto;}
+      table{width:100%;border-collapse:collapse;font-size:var(--text-sm);}
+      th{text-align:left;padding:var(--space-3) var(--space-4);color:var(--color-text-muted);font-weight:600;
+        border-bottom:1px solid var(--color-divider);text-transform:uppercase;letter-spacing:.05em;font-size:11px;}
+      td{padding:var(--space-4);border-bottom:1px solid var(--color-divider);vertical-align:middle;transition:background-color var(--transition);}
+      tr:last-child td{border-bottom:none;}
+      tr:hover td{background-color:oklch(from var(--color-primary) l c h / 0.05);cursor:pointer;}
+      .player-cell{display:flex;align-items:center;gap:var(--space-3);}
+      .player-avatar{width:32px;height:32px;border-radius:var(--radius-md);background:var(--color-surface-offset);overflow:hidden;flex-shrink:0;}
+      .player-name{font-weight:600;color:var(--color-text);}
+      .playtime-bar-bg{width:100%;height:8px;background:var(--color-surface-offset);border-radius:var(--radius-full);overflow:hidden;}
+      .playtime-bar-fill{height:100%;background:var(--color-primary);border-radius:var(--radius-full);transition:width 800ms cubic-bezier(0.16,1,0.3,1);}
+      .rank-badge{width:24px;height:24px;border-radius:var(--radius-full);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:10px;}
+      .rank-1{background:oklch(0.85 0.15 80);color:oklch(0.3 0.1 80);}
+      .rank-2{background:oklch(0.85 0.02 0);color:oklch(0.4 0 0);}
+      .rank-3{background:oklch(0.7 0.1 50);color:oklch(0.2 0.05 50);}
 
-      /* Player head images */
-      .player-head{border-radius:var(--radius-sm);image-rendering:pixelated;vertical-align:middle;flex-shrink:0;}
-      .panel-btn-row{display:flex;align-items:center;gap:var(--space-2);flex-shrink:0;margin-top:2px;}
-      .close-btn,.fullscreen-btn{width:28px;height:28px;border-radius:var(--radius-full);
-        display:flex;align-items:center;justify-content:center;color:var(--color-text-muted);
-        border:1px solid var(--color-border);background:none;cursor:pointer;font-size:14px;
-        transition:color var(--transition),background var(--transition),transform var(--transition);}
-      .close-btn:hover,.fullscreen-btn:hover{color:var(--color-text);background:var(--color-surface-dynamic);}
-      .fullscreen-btn:hover{transform:scale(1.1);}
+      /* Side Panel */
+      .side-panel{background:var(--color-surface);border:1px solid oklch(from var(--color-text) l c h/0.08);
+        border-radius:var(--radius-xl);padding:var(--space-6);box-shadow:var(--shadow-md);display:none;flex-direction:column;gap:var(--space-6);
+        max-height:1000px;overflow-y:auto;position:relative;animation:slideIn 400ms cubic-bezier(0.16,1,0.3,1);}
+      @keyframes slideIn{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
+      .heatmap-section.panel-open .side-panel{display:flex;}
+      .panel-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);}
+      .panel-close-btn{background:none;border:none;color:var(--color-text-muted);cursor:pointer;padding:4px;border-radius:var(--radius-sm);transition:all var(--transition);}
+      .panel-close-btn:hover{background:var(--color-surface-offset);color:var(--color-text);}
 
-      /* Tooltip */
-      .tooltip{position:fixed;z-index:100;pointer-events:none;
-        background:var(--color-surface-2);border:1px solid oklch(from var(--color-text) l c h/0.12);
-        border-radius:var(--radius-lg);padding:var(--space-3) var(--space-4);
-        box-shadow:var(--shadow-lg);min-width:200px;max-width:260px;
-        opacity:0;transition:opacity 100ms ease;}
-      .tooltip.visible{opacity:1;}
-      .tooltip-date{font-size:var(--text-xs);color:var(--color-text-muted);margin-bottom:var(--space-2);font-weight:500;}
-      .tooltip-total{font-size:var(--text-sm);font-weight:700;margin-bottom:var(--space-3);}
-      .tooltip-player{display:flex;justify-content:space-between;align-items:center;font-size:var(--text-xs);margin-bottom:var(--space-1);}
-      .player-dot{width:7px;height:7px;border-radius:50%;margin-right:var(--space-2);display:inline-block;}
-      .tooltip-player .player-head{margin-right:var(--space-2);}
+      .chart-container{height:240px;width:100%;position:relative;}
 
-      /* Player table */
-      .player-table{width:100%;border-collapse:collapse;}
-      .player-table th{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em;
-        color:var(--color-text-faint);font-weight:500;text-align:left;
-        padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider);}
-      .player-table td{padding:var(--space-3) var(--space-4);font-size:var(--text-sm);
-        border-bottom:1px solid oklch(from var(--color-text) l c h/0.05);}
-      .player-table tr:last-child td{border-bottom:none;}
-      .player-table tr { transition: background var(--transition); }
-      .player-table tr:hover td { background: var(--color-surface-dynamic); }
-      .player-color-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:var(--space-2);vertical-align:middle;}
-      .rank-badge{display:inline-flex;align-items:center;justify-content:center;
-        width:20px;height:20px;border-radius:var(--radius-full);font-size:10px;font-weight:700;
-        margin-right:var(--space-2);vertical-align:middle;}
-      .rank-1{background:oklch(0.85 0.12 85);color:oklch(0.4 0.1 85);}
-      .rank-2{background:oklch(0.82 0.04 240);color:oklch(0.4 0.06 240);}
-      .rank-3{background:oklch(0.80 0.08 50);color:oklch(0.45 0.09 50);}
+      /* TOOLTIP */
+      .tippy-box{background-color:var(--color-surface-2);border:1px solid var(--color-border);color:var(--color-text);
+        box-shadow:var(--shadow-lg);border-radius:var(--radius-md);font-size:12px;padding:4px;}
 
       /* Player Detail Modal */
-      .modal-overlay {
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
-        display: flex; align-items: center; justify-content: center;
-        z-index: 1000; opacity: 0; pointer-events: none;
-        transition: opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
-      }
-      .modal-overlay.visible { opacity: 1; pointer-events: auto; }
-      .modal-content {
-        background: var(--color-surface);
-        border: 1px solid oklch(from var(--color-text) l c h / 0.1);
-        border-radius: var(--radius-xl);
-        width: 90%; max-width: 840px; height: auto; max-height: 90dvh;
-        overflow-y: auto; position: relative;
-        transform: translateY(20px) scale(0.98);
-        transition: transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
-        box-shadow: var(--shadow-lg);
-        display: grid; grid-template-columns: 320px 1fr;
-      }
-      @media (max-width: 768px) {
-        .modal-content { grid-template-columns: 1fr; }
-      }
-      .modal-overlay.visible .modal-content { transform: translateY(0) scale(1); }
-      .modal-close {
-        position: absolute; top: var(--space-4); right: var(--space-4);
-        width: 32px; height: 32px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        background: var(--color-surface-dynamic); border: 1px solid var(--color-border);
-        color: var(--color-text); cursor: pointer; z-index: 10;
-      }
-      .modal-viewer-side {
-        background: oklch(from var(--color-primary) 0.15 0.04 h);
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        padding: var(--space-8); position: relative;
-      }
-      #skinViewerWrap { width: 100%; aspect-ratio: 3/4; cursor: grab; position: relative; }
-      #skinViewerWrap:active { cursor: grabbing; }
-      #skinViewerCanvas { width: 100% !important; height: 100% !important; display: block; }
-      .modal-info-side { padding: var(--space-8); display: flex; flex-direction: column; gap: var(--space-6); }
-      .modal-player-header { display: flex; align-items: center; gap: var(--space-4); }
-      .modal-player-name { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.02em; }
-      .modal-stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
-      .stat-card {
-        background: var(--color-surface-2); border: 1px solid var(--color-divider);
-        padding: var(--space-4); border-radius: var(--radius-lg);
-        display: flex; flex-direction: column; gap: var(--space-1);
-      }
-      .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-text-faint); font-weight: 700; }
-      .stat-value { font-size: var(--text-base); font-weight: 700; color: var(--color-text); }
-      .stat-icon { color: var(--color-primary); margin-bottom: var(--space-1); }
+      .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);
+        display:none;align-items:center;justify-content:center;z-index:1000;opacity:0;transition:opacity 250ms ease;}
+      .modal-overlay.active{display:flex;opacity:1;}
+      .modal-content{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-xl);
+        width:90%;max-width:800px;max-height:90vh;overflow:hidden;box-shadow:var(--shadow-lg);
+        display:grid;grid-template-columns:300px 1fr;animation:modalIn 350ms cubic-bezier(0.16,1,0.3,1);}
+      @media(max-width:700px){.modal-content{grid-template-columns:1fr;}}
+      @keyframes modalIn{from{opacity:0;transform:translateY(30px) scale(0.98);}to{opacity:1;transform:translateY(0) scale(1);}}
 
-      @media(max-width:768px){
-        .heatmap-section.panel-open{grid-template-columns:1fr;}
-        header{padding:var(--space-3) var(--space-4);}
-        main{padding:var(--space-6) var(--space-4);}
-      }
+      .modal-left{background:var(--color-surface-offset);padding:var(--space-8);display:flex;flex-direction:column;align-items:center;gap:var(--space-6);border-right:1px solid var(--color-divider);}
+      .modal-right{padding:var(--space-8);overflow-y:auto;display:flex;flex-direction:column;gap:var(--space-8);}
+      
+      .skin-viewer-container{width:200px;height:320px;cursor:grab;}
+      .skin-viewer-container:active{cursor:grabbing;}
+      
+      .modal-player-name{font-size:var(--text-lg);font-weight:700;letter-spacing:-0.02em;}
+      .modal-stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);width:100%;}
+      .modal-stat-item{background:var(--color-surface);padding:var(--space-4);border-radius:var(--radius-lg);border:1px solid var(--color-divider);}
+      .modal-stat-label{font-size:10px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+      .modal-stat-value{font-size:var(--text-base);font-weight:600;}
+
+      .modal-chart-section{flex:1;min-height:200px;}
+      .modal-close-corner{position:absolute;top:var(--space-4);right:var(--space-4);z-index:10;}
+
+      .btn-primary{background:var(--color-primary);color:white;border:none;padding:var(--space-2) var(--space-4);
+        border-radius:var(--radius-md);font-weight:600;font-size:var(--text-sm);cursor:pointer;transition:all var(--transition);}
+      .btn-primary:hover{background:var(--color-primary-hover);transform:translateY(-1px);box-shadow:var(--shadow-sm);}
     </style>
   </head>
   <body>
@@ -259,843 +181,199 @@
           <img src="/server-logo.jpg" alt="MC Boys Logo" height="110" style="border-radius:8px; object-fit:contain;" />
         </div>
         <div>
-          <h1 class="page-title">Player Session Activity</h1>
-          <p class="page-sub" id="pageSub">Combined playtime from join/leave events</p>
+          <h1 class="page-title">{{DASHBOARD_TITLE}}</h1>
+          <p class="page-sub" id="pageSub">{{DASHBOARD_DESCRIPTION}}</p>
         </div>
       </div>
     </header>
 
     <main>
-      <div class="kpi-row" id="kpiRow"></div>
+      <div class="kpi-row" id="kpiRow">
+        <div class="kpi">
+          <span class="kpi-label">Total Days</span>
+          <span class="kpi-value" id="stat-days">-</span>
+          <span class="kpi-note">Tracking period</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Total Playtime</span>
+          <span class="kpi-value" id="stat-total-time">-</span>
+          <span class="kpi-note">Across all players</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Active Players</span>
+          <span class="kpi-value" id="stat-active-players">-</span>
+          <span class="kpi-note">Unique logins</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Avg Session</span>
+          <span class="kpi-value" id="stat-avg-session">-</span>
+          <span class="kpi-note">Minutes per login</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Peak Hour</span>
+          <span class="kpi-value" id="stat-peak-hour">-</span>
+          <span class="kpi-note">Most active time</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Latest Login</span>
+          <span class="kpi-value" id="stat-latest-player" style="font-size:var(--text-base)">-</span>
+          <span class="kpi-note">Most recent event</span>
+        </div>
+      </div>
 
-      <div class="card" style="height:fit-content;">
-        <div class="heatmap-section" id="heatmapSection">
-          <div class="heatmap-left">
-            <div class="card-title" style="margin-bottom:var(--space-4);">
-              Daily Playtime Calendar <span class="card-subtitle">click a day to see player breakdown</span>
-            </div>
-            <div class="heatmap-scroll">
-              <div class="heatmap-inner">
-                <div class="day-labels-row" id="dayLabels"></div>
-                <div class="heatmap-grid" id="heatmapGrid"></div>
+      <div class="heatmap-section" id="heatmapSection">
+        <div class="heatmap-left card">
+          <div class="panel-header">
+            <h2 class="card-title">Activity Heatmap <span class="card-subtitle">Past 9 weeks</span></h2>
+            <button class="theme-toggle" id="themeToggle" title="Toggle Theme">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            </button>
+          </div>
+          <div class="heatmap-scroll">
+            <div class="heatmap-inner">
+              <div class="day-labels-row">
+                <div class="day-label-spacer"></div>
+                <div class="day-label-item">Mon</div><div class="day-label-item">Tue</div><div class="day-label-item">Wed</div><div class="day-label-item">Thu</div><div class="day-label-item">Fri</div><div class="day-label-item">Sat</div><div class="day-label-item">Sun</div>
               </div>
-            </div>
-            <div class="legend-row">
-              <span class="legend-label">Less</span>
-              <div class="legend-cells" id="legendCells"></div>
-              <span class="legend-label">More</span>
+              <div class="heatmap-grid" id="heatmapGrid"></div>
+              <div class="heatmap-legend">
+                <span class="legend-label">Less</span>
+                <div class="legend-cells">
+                  <div class="legend-cell" style="background:var(--cell-empty)"></div>
+                  <div class="legend-cell" style="background:var(--cell-1)"></div>
+                  <div class="legend-cell" style="background:var(--cell-2)"></div>
+                  <div class="legend-cell" style="background:var(--cell-3)"></div>
+                  <div class="legend-cell" style="background:var(--cell-4)"></div>
+                  <div class="legend-cell" style="background:var(--cell-5)"></div>
+                </div>
+                <span class="legend-label">More</span>
+              </div>
             </div>
           </div>
-          <div class="day-panel" id="dayPanel">
-            <div class="day-panel-header">
-              <div>
-                <div class="day-panel-title" id="panelTitle"></div>
-                <div class="day-panel-sub" id="panelSub"></div>
-              </div>
-              <div class="panel-btn-row">
-                <button class="fullscreen-btn" id="fullscreenPanel" aria-label="Expand" title="Expand panel">
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 13 13"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                  >
-                    <path d="M1 5V1h4M8 1h4v4M12 8v4H8M5 12H1V8" />
-                  </svg>
-                </button>
-                <button class="close-btn" id="closePanel" aria-label="Close">✕</button>
-              </div>
-            </div>
-            <div style="display:flex;gap:8px;margin-bottom:var(--space-2);">
-              <button
-                id="btnPie"
-                style="flex:1;padding:4px;border-radius:4px;border:none;background:var(--color-primary);color:#fff;cursor:pointer;font-size:var(--text-xs);font-weight:600;"
-              >
-                Pie Chart
-              </button>
-              <button
-                id="btnHourly"
-                style="flex:1;padding:4px;border-radius:4px;border:none;background:var(--color-surface-offset);color:var(--color-text);cursor:pointer;font-size:var(--text-xs);font-weight:600;"
-              >
-                Hourly Graph
-              </button>
-            </div>
-            <div id="pieViewContainer" style="display:flex;flex-direction:column;justify-content:center;flex:1;">
-              <div class="pie-wrap" id="chartWrapPie"><canvas id="pieChart"></canvas></div>
-              <div class="pie-legend" id="pieLegend"></div>
-            </div>
-            <div id="hourlyViewContainer" style="display:none;flex-direction:column;justify-content:center;flex:1;">
-              <div id="chartWrapHourly" style="width:100%; height:280px; position:relative; flex-shrink:0;">
-                <canvas id="hourlyChart" style="cursor:pointer;"></canvas>
-              </div>
-              <div id="hourBreakdown" style="display:block; margin-top:var(--space-3);"></div>
-            </div>
-            <div
-              id="noDataMsg"
-              style="display:none;text-align:center;padding:var(--space-8) 0;color:var(--color-text-faint);font-size:var(--text-sm);"
-            >
-              No playtime data for this day.
-            </div>
+        </div>
+
+        <div class="side-panel card" id="sidePanel">
+          <div class="panel-header">
+            <h2 class="card-title" id="panelTitle">Day Activity</h2>
+            <button class="panel-close-btn" id="closePanel">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div class="chart-container">
+            <canvas id="hourlyChart"></canvas>
+          </div>
+          <div class="table-container">
+            <table id="panelTable">
+              <thead><tr><th>Player</th><th>Minutes</th></tr></thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Player Breakdown <span class="card-subtitle">total session time</span></div>
-        <table class="player-table">
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>Total Hours</th>
-              <th>Sessions</th>
-              <th>Avg Session</th>
-            </tr>
-          </thead>
-          <tbody id="playerTableBody"></tbody>
-        </table>
-      </div>
-
-      <div class="modal-overlay" id="playerModal">
-        <div class="modal-content">
-          <button class="modal-close" onclick="closePlayerModal()">✕</button>
-          <div class="modal-viewer-side">
-            <div id="skinViewerWrap"><canvas id="skinViewerCanvas"></canvas></div>
-          </div>
-          <div class="modal-info-side">
-            <div class="modal-player-header">
-              <div id="modalPlayerHead"></div>
-              <div class="modal-player-name" id="modalPlayerName">PlayerName</div>
-            </div>
-            <div class="modal-stats-grid" id="modalStats">
-              <!-- Stats dynamic -->
-            </div>
-            <div style="margin-top:auto; font-size:var(--text-xs); color:var(--color-text-faint); display:flex; align-items:center; gap:var(--space-2);">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-              Calculated from latest server logs
-            </div>
-          </div>
+        <h2 class="card-title">All-Time Rankings <span class="card-subtitle">By total playtime</span></h2>
+        <div class="table-container">
+          <table id="leaderboard">
+            <thead>
+              <tr>
+                <th style="width: 60px;">Rank</th>
+                <th>Player</th>
+                <th style="width: 200px;">Playtime</th>
+                <th>Progress</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </main>
 
-    <div class="tooltip" id="tooltip"></div>
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+      <div class="modal-content" id="modalContent">
+        <button class="panel-close-btn modal-close-corner" id="closeModal">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+        <div class="modal-left">
+          <div class="skin-viewer-container" id="skinViewer"></div>
+          <h2 class="modal-player-name" id="modalPlayerName">Player</h2>
+          <div class="modal-stats-grid">
+            <div class="modal-stat-item">
+              <div class="modal-stat-label">Total Time</div>
+              <div class="modal-stat-value" id="mstat-total">-</div>
+            </div>
+            <div class="modal-stat-item">
+              <div class="modal-stat-label">Sessions</div>
+              <div class="modal-stat-value" id="mstat-sessions">-</div>
+            </div>
+            <div class="modal-stat-item">
+              <div class="modal-stat-label">Avg Session</div>
+              <div class="modal-stat-value" id="mstat-avg">-</div>
+            </div>
+            <div class="modal-stat-item">
+              <div class="modal-stat-label">Last Seen</div>
+              <div class="modal-stat-value" id="mstat-last" style="font-size:11px">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-right">
+          <div>
+            <h3 class="card-title" style="margin-bottom: var(--space-4);">Hourly Distribution</h3>
+            <div style="height: 250px; width: 100%;">
+              <canvas id="modalChart"></canvas>
+            </div>
+          </div>
+          <div style="flex: 1;">
+            <h3 class="card-title" style="margin-bottom: var(--space-4);">Recent Sessions</h3>
+            <div class="table-container">
+              <table id="modalSessionsTable">
+                <thead><tr><th>Date</th><th>Duration</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script>
-      /**
-       * mc-activity-heatmap — Minecraft Server Activity Dashboard
-       * Fetches session data from the Fabric mod's embedded HTTP server (/api/activity)
-       * and renders a GitHub-style heatmap calendar, per-day pie/hourly charts, player
-       * ranking KPIs, and an all-time player breakdown table.
-       * Player head images and skin-derived accent colors are loaded from /faces/ and
-       * /api/player-meta respectively.
-       */
       let daily = {};
       let playerDailyRaw = {};
       let sessData = {};
       let hourly = {};
-
-      let currentViewMode = 'pie';
-      let selectedDateStr = null;
-      let isPanelFullscreen = false;
-
-      function updateFullscreenIcon() {
-        const btn = document.getElementById('fullscreenPanel');
-        if (!btn) return;
-        btn.innerHTML = isPanelFullscreen
-          ? `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 1H1v3M9 1h3v3M9 12h3V9M4 12H1V9"/></svg>`
-          : `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 5V1h4M8 1h4v4M12 8v4H8M5 12H1V8"/></svg>`;
-        btn.title = isPanelFullscreen ? 'Collapse panel' : 'Expand panel';
-      }
-
-      // Dynamic player colors fetched from skin-derived data
-      let PLAYER_META = {};
-
-      // Returns an <img> tag for a player's Minecraft head
-      function playerHead(name, size = 16) {
-        return `<img src="/faces/${encodeURIComponent(name)}.png" alt="${name}" width="${size}" height="${size}" class="player-head" loading="lazy" onerror="this.onerror=null;this.src='/faces/default_head.png'">`;
-      }
-
-      // Returns a small color indicator (for contexts where images don't work, like chart.js)
-      function playerColor(name) {
-        return (PLAYER_META[name] && PLAYER_META[name].colorHex) || '#888';
-      }
+      let playerMeta = {};
 
       let playerTotals = {};
       let ranked = [];
-
-      // Theme toggle
-      (function(){
-        const t=document.querySelector('[data-theme-toggle]'),r=document.documentElement;
-        let d=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
-        r.setAttribute('data-theme',d);
-        t&&t.addEventListener('click',()=>{
-          d=d==='dark'?'light':'dark'; r.setAttribute('data-theme',d);
-          t.innerHTML=d==='dark'
-            ?'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
-            :'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
-        });
-      })();
-
-      function fmtHours(h){ return h<1 ? Math.round(h*60)+'m' : h.toFixed(1)+'h'; }
-
-      function getLevel(hours, max){
-        if(!hours||hours===0) return 0;
-        const f=hours/max;
-        if(f<0.1) return 1; if(f<0.3) return 2; if(f<0.55) return 3; if(f<0.8) return 4; return 5;
-      }
-
-      // KPIs — show top 3 players
-      function buildKPIs(){
-        const totalHours = Object.values(daily).reduce((a,b)=>a+b,0);
-        const activeDays = Object.keys(daily).length;
-        const maxDay = Object.entries(daily).sort((a,b)=>b[1]-a[1])[0];
-        const maxDate = new Date(maxDay[0]+'T12:00:00');
-        const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-        const dates = Object.keys(daily).sort();
-        let totalSpan = 0;
-        if (dates.length > 0) {
-          const firstD = new Date(dates[0]+'T12:00:00');
-          const lastD = new Date(dates[dates.length-1]+'T12:00:00');
-          totalSpan = Math.floor((lastD - firstD) / (1000 * 60 * 60 * 24)) + 1;
-        }
-
-        const top3 = ranked.slice(0, 3);
-        const rankLabels = ['🥇 Most Active', '🥈 2nd Most Active', '🥉 3rd Most Active'];
-
-        document.getElementById('kpiRow').innerHTML = `
-          <div class="kpi">
-            <div class="kpi-label">Total Playtime</div>
-            <div class="kpi-value">${Math.round(totalHours)}h</div>
-            <div class="kpi-note">Combined player-hours</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Active Days</div>
-            <div class="kpi-value">${activeDays}</div>
-            <div class="kpi-note">Out of ${totalSpan} days</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Busiest Day</div>
-            <div class="kpi-value">${months[maxDate.getMonth()]} ${maxDate.getDate()}</div>
-            <div class="kpi-note">${maxDay[1].toFixed(1)}h of playtime</div>
-          </div>
-          ${top3.map(([p,m],i) => `
-          <div class="kpi">
-            <div class="kpi-label">${rankLabels[i]}</div>
-            <div class="kpi-value" style="font-size:var(--text-sm);font-weight:700;display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;word-break:break-all;">
-              ${playerHead(p, 28)}
-              <span style="line-height:1">${p}</span>
-            </div>
-            <div class="kpi-note">${fmtHours(m/60)} total</div>
-          </div>`).join('')}
-        `;
-      }
-
-      // Pie chart instance
-      let pieChartInstance = null;
-
-      function buildPieForDay(dateStr, animate=true){
-        const pData = playerDailyRaw[dateStr]||{};
-        const sorted = Object.entries(pData).sort((a,b)=>b[1]-a[1]).filter(([,m])=>m>0);
-        if(!sorted.length) return;
-
-        const labels = sorted.map(([p])=>p);
-        const data = sorted.map(([,m])=>m);
-        const colors = sorted.map(([p])=>playerColor(p));
-
-        const d = new Date(dateStr+'T12:00:00');
-        const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        document.getElementById('panelTitle').textContent = `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}`;
-        const totalH = data.reduce((a,b)=>a+b,0)/60;
-        document.getElementById('panelSub').textContent = `${fmtHours(totalH)} total · ${sorted.length} player${sorted.length>1?'s':''}`;
-
-        if(pieChartInstance){ pieChartInstance.destroy(); pieChartInstance=null; }
-
-        const isDark = document.documentElement.getAttribute('data-theme')==='dark';
-        pieChartInstance = new Chart(document.getElementById('pieChart'),{
-          type:'doughnut',
-          data:{labels, datasets:[{data, backgroundColor:colors, borderWidth:2,
-            borderColor: isDark?'#1c1b19':'#f9f8f5', hoverBorderColor:'transparent'}]},
-          options:{
-            animation: animate ? undefined : false,
-            responsive:true, maintainAspectRatio:true, cutout:'55%',
-            plugins:{
-              legend:{display:false},
-              tooltip:{
-                backgroundColor: isDark?'#2d2c2a':'#fff',
-                titleColor: isDark?'#cdccca':'#28251d',
-                bodyColor: isDark?'#797876':'#7a7974',
-                borderColor: isDark?'#393836':'#d4d1ca',
-                borderWidth:1, padding:8, cornerRadius:8,
-                callbacks:{label:item=>' '+fmtHours(item.raw/60)}
-              }
-            }
-          }
-        });
-
-        document.getElementById('pieLegend').innerHTML = sorted.map(([p,m])=>`
-          <div class="pie-legend-item">
-            <span class="pie-legend-name">${playerHead(p, 24)} ${p}</span>
-            <span class="pie-legend-val">${fmtHours(m/60)}</span>
-          </div>`).join('');
-      }
-
-      let hourlyChartInstance = null;
-      let hourlyLocalData = {}; // module-level so onClick can access it
-      let hourlyLabelList = [];
-
-      function showHourBreakdown(hourIndex) {
-        const container = document.getElementById('hourBreakdown');
-        const label = hourlyLabelList[hourIndex] || '';
-        const players = Object.entries(hourlyLocalData)
-          .map(([p, arr]) => ({ p, mins: arr[hourIndex] || 0 }))
-          .filter(x => x.mins > 0.5)
-          .sort((a, b) => b.mins - a.mins);
-
-        if (!players.length) {
-          container.style.display = 'block';
-          container.innerHTML = '<div style="text-align:center; padding:var(--space-4); color:var(--color-text-muted); font-size:var(--text-sm);">No players active during this hour.</div>';
-          return;
-        }
-
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        container.style.display = 'block';
-        container.innerHTML = `
-          <div style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.06em;
-            color:var(--color-text-muted);margin-bottom:var(--space-2);">${label} breakdown</div>
-          ${players.map(({p, mins}) => {
-            const pct = Math.round(mins);
-            const totalMins = players.reduce((a,b)=>a+b.mins,0);
-            const barPct = Math.round((mins/totalMins)*100);
-            return `<div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2);">
-              ${playerHead(p, 24)}
-              <span style="font-size:var(--text-xs);color:var(--color-text-muted);width:90px;flex-shrink:0;">${p}</span>
-              <div style="flex:1;height:6px;border-radius:3px;background:var(--color-surface-dynamic);overflow:hidden;">
-                <div style="height:100%;width:${barPct}%;background:${playerColor(p)};border-radius:3px;"></div>
-              </div>
-              <span style="font-size:var(--text-xs);font-weight:600;width:48px;text-align:right;flex-shrink:0;">${fmtHours(mins/60)}</span>
-            </div>`;
-          }).join('')}
-        `;
-      }
-
-      function buildHourlyForDay(dateStr, animate=true) {
-        // Server logs are in UTC. Convert to browser local time.
-        const offsetMin = new Date().getTimezoneOffset(); // positive = behind UTC (e.g. EDT=240)
-        const offsetH = Math.round(offsetMin / 60); // e.g. 4 for EDT
-
-        // Get adjacent UTC days for cross-boundary data
-        const d0 = new Date(dateStr + 'T12:00:00');
-        const dPrev = new Date(d0); dPrev.setDate(dPrev.getDate() - 1);
-        const dNext = new Date(d0); dNext.setDate(dNext.getDate() + 1);
-        const fmtD = dt => dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
-        const prevStr = fmtD(dPrev);
-        const nextStr = fmtD(dNext);
-
-        const hToday = hourly[dateStr] || {};
-        const hPrev  = hourly[prevStr] || {};
-        const hNext  = hourly[nextStr] || {};
-
-        // Collect all players across the 3 UTC days
-        const allPlayers = new Set([...Object.keys(hToday), ...Object.keys(hPrev), ...Object.keys(hNext)]);
-
-        // Build local-time arrays: local hour h => UTC hour (h + offsetH)
-        const localData = {};
-        for (const p of allPlayers) {
-          const localArr = new Array(24).fill(0);
-          for (let lh = 0; lh < 24; lh++) {
-            const utcH = lh + offsetH;
-            if (utcH >= 0 && utcH < 24) {
-              localArr[lh] = ((hToday[p] || [])[utcH] || 0);
-            } else if (utcH >= 24) {
-              localArr[lh] = ((hNext[p] || [])[utcH - 24] || 0);
-            } else {
-              localArr[lh] = ((hPrev[p] || [])[utcH + 24] || 0);
-            }
-          }
-          if (localArr.some(v => v > 0)) localData[p] = localArr;
-        }
-
-        const players = Object.keys(localData);
-        if (!players.length) return;
-
-        // Labels in local time
-        const hours = Array.from({length: 24}, (_, i) => {
-          let h = i % 12 || 12;
-          let ampm = i < 12 ? 'am' : 'pm';
-          return `${h}${ampm}`;
-        });
-
-        const datasets = players.map(p => {
-          return {
-            label: p,
-            data: localData[p].map(m => m / 60),
-            backgroundColor: playerColor(p),
-            borderWidth: 0
-          };
-        });
-
-        // Store at module level for click handler
-        hourlyLocalData = localData;
-        hourlyLabelList = hours;
-
-        // Clear stale breakdown
-        const bd = document.getElementById('hourBreakdown');
-        if (bd) { bd.style.display = 'none'; bd.innerHTML = ''; }
-
-        if(hourlyChartInstance){ hourlyChartInstance.destroy(); hourlyChartInstance=null; }
-
-        const isDark = document.documentElement.getAttribute('data-theme')==='dark';
-        hourlyChartInstance = new Chart(document.getElementById('hourlyChart'),{
-          type: 'bar',
-          data: {
-            labels: hours,
-            datasets: datasets
-          },
-          options: {
-            animation: animate ? undefined : false,
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-              x: {
-                stacked: true,
-                grid: { display: false },
-                ticks: {
-                  autoSkip: false,
-                  maxRotation: 45,
-                  minRotation: 45,
-                  font: { size: 13, weight: '600' },
-                  color: isDark ? '#797876' : '#7a7974'
-                }
-              },
-              y: {
-                stacked: true,
-                grid: { color: isDark ? '#393836' : '#dcd9d5' },
-                ticks: { font: { size: 12 }, color: isDark ? '#797876' : '#7a7974' }
-              }
-            },
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                backgroundColor: isDark?'#2d2c2a':'#fff',
-                titleColor: isDark?'#cdccca':'#28251d',
-                bodyColor: isDark?'#797876':'#7a7974',
-                borderColor: isDark?'#393836':'#d4d1ca',
-                borderWidth:1, padding:8, cornerRadius:8,
-                callbacks:{label:item=>item.dataset.label + ': ' + fmtHours(item.raw)}
-              }
-            },
-            onClick(event, elements, chart) {
-              // Determine clicked hour index from bar or x-axis label area
-              const points = chart.getElementsAtEventForMode(event, 'index', { intersect: false }, false);
-              if (points.length) {
-                showHourBreakdown(points[0].index);
-              }
-            }
-          }
-        });
-      }
-
-      let selectedCell = null;
-
-      function buildCalendar(){
-        const grid = document.getElementById('heatmapGrid');
-        grid.innerHTML='';
-
-        const dates = Object.keys(daily).sort();
-        let start, end, today;
-        if (dates.length > 0) {
-          const firstDate = new Date(dates[0] + 'T12:00:00');
-          const lastDate = new Date(dates[dates.length - 1] + 'T12:00:00');
-          start = new Date(firstDate);
-          end = new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 0);
-          today = lastDate;
-          const mnames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          document.getElementById('pageSub').innerHTML = `Combined playtime from join/leave events &middot; ${mnames[firstDate.getMonth()]} ${firstDate.getDate()} &ndash; ${mnames[lastDate.getMonth()]} ${lastDate.getDate()}, ${lastDate.getFullYear()}`;
-        } else {
-          start = new Date(); start.setDate(1);
-          end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
-          today = new Date();
-        }
-        const maxHours = Object.keys(daily).length > 0 ? Math.max(...Object.values(daily)) : 0;
-
-        const startSunday = new Date(start);
-        startSunday.setDate(startSunday.getDate() - startSunday.getDay());
-
-        const weeks=[];
-        let current=new Date(startSunday);
-        while(current<=end || current.getDay()!==0){
-          const week=[];
-          for(let d=0;d<7;d++){week.push(new Date(current));current.setDate(current.getDate()+1);}
-          weeks.push(week);
-          if(current>end && current.getDay()===0) break;
-        }
-
-        // Build day-of-week header
-        const dayLabelsEl = document.getElementById('dayLabels');
-        dayLabelsEl.innerHTML = '';
-        const spacerEl = document.createElement('div');
-        spacerEl.className = 'day-label-spacer';
-        dayLabelsEl.appendChild(spacerEl);
-        ['S','M','T','W','T','F','S'].forEach(d => {
-          const lbl = document.createElement('div');
-          lbl.className = 'day-label-item';
-          lbl.textContent = d;
-          dayLabelsEl.appendChild(lbl);
-        });
-
-        const tooltip=document.getElementById('tooltip');
-        const mnames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-        // Grid: each row = one week, cols = week-label + Sun..Sat
-        let lastMonth = -1;
-        weeks.forEach(week => {
-          // Week label cell (month name when it changes)
-          const weekLbl = document.createElement('div');
-          weekLbl.className = 'week-label';
-          const firstInRange = week.find(d => d >= start && d <= end);
-          if (firstInRange && firstInRange.getMonth() !== lastMonth) {
-            lastMonth = firstInRange.getMonth();
-            weekLbl.textContent = mnames[lastMonth];
-          }
-          grid.appendChild(weekLbl);
-
-          // 7 day cells: Sun=0 … Sat=6
-          week.forEach(day => {
-            const cell = document.createElement('div');
-            cell.className = 'day-cell';
-            const dateStr = day.getFullYear()+'-'+(String(day.getMonth()+1).padStart(2,'0'))+'-'+(String(day.getDate()).padStart(2,'0'));
-            const hours = daily[dateStr] || 0;
-            const isFuture = day > today;
-            const isOut = day < start || day > end;
-
-            if (isFuture || isOut) {
-              cell.classList.add('future');
-            } else {
-              const lv = getLevel(hours, maxHours);
-              if (lv > 0) cell.classList.add('lv' + lv);
-              cell.setAttribute('data-date', dateStr);
-
-              // Hover tooltip
-              cell.addEventListener('mouseenter', e => {
-                const pData = playerDailyRaw[dateStr] || {};
-                const sorted = Object.entries(pData).sort((a,b) => b[1]-a[1]);
-                const d = new Date(dateStr + 'T12:00:00');
-                const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-                tooltip.innerHTML = `
-                  <div class="tooltip-date">${dayName}, ${mnames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}</div>
-                  <div class="tooltip-total">${fmtHours(hours)} total playtime</div>
-                  ${sorted.map(([p,m]) => `<div class="tooltip-player">
-                    <span>${playerHead(p, 16)}<span style="color:var(--color-text-muted)">${p}</span></span>
-                    <span style="font-weight:500">${fmtHours(m/60)}</span>
-                  </div>`).join('')}`;
-                tooltip.classList.add('visible');
-                positionTooltip(e);
-              });
-              cell.addEventListener('mousemove', positionTooltip);
-              cell.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
-
-              // Click to open panel
-              cell.addEventListener('click', () => {
-                tooltip.classList.remove('visible');
-                if (selectedCell === cell) {
-                  closePanel();
-                  return;
-                }
-                if (selectedCell) selectedCell.classList.remove('selected');
-                selectedCell = cell;
-                cell.classList.add('selected');
-                selectedDateStr = dateStr;
-
-                const hasData = (daily[dateStr] || 0) > 0;
-
-                if (!hasData) {
-                  // Clear any stale charts
-                  if(pieChartInstance){ pieChartInstance.destroy(); pieChartInstance=null; }
-                  if(hourlyChartInstance){ hourlyChartInstance.destroy(); hourlyChartInstance=null; }
-                  const d = new Date(dateStr+'T12:00:00');
-                  const mnames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-                  document.getElementById('panelTitle').textContent = `${days[d.getDay()]}, ${mnames[d.getMonth()]} ${d.getDate()}`;
-                  document.getElementById('panelSub').textContent = 'No activity recorded';
-                  document.getElementById('chartWrapPie').style.display = 'none';
-                  document.getElementById('chartWrapHourly').style.display = 'none';
-                  document.getElementById('pieLegend').innerHTML = '';
-                  document.getElementById('pieLegend').style.display = 'none';
-                  document.getElementById('noDataMsg').style.display = 'block';
-                } else {
-                  document.getElementById('noDataMsg').style.display = 'none';
-                  // Restore chart visibility based on current mode
-                  if(currentViewMode === 'pie') {
-                    document.getElementById('chartWrapPie').style.display = 'block';
-                    document.getElementById('chartWrapHourly').style.display = 'none';
-                    buildPieForDay(dateStr);
-                  } else {
-                    document.getElementById('chartWrapPie').style.display = 'none';
-                    document.getElementById('chartWrapHourly').style.display = 'block';
-                    const d = new Date(dateStr+'T12:00:00');
-                    const mnames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                    const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-                    document.getElementById('panelTitle').textContent = `${days[d.getDay()]}, ${mnames[d.getMonth()]} ${d.getDate()}`;
-                    const hData = hourly[dateStr] || {};
-                    let totalH = 0; let activeP = 0;
-                    Object.values(hData).forEach(arr => { let sum = arr.reduce((a,b)=>a+b,0)/60; if(sum>0) activeP++; totalH += sum; });
-                    document.getElementById('panelSub').textContent = `${fmtHours(totalH)} total · ${activeP} player${activeP>1?'s':''}`;
-                    buildHourlyForDay(dateStr);
-                  }
-                }
-
-                const section = document.getElementById('heatmapSection');
-                const panel = document.getElementById('dayPanel');
-                panel.classList.remove('closing');
-                section.classList.add('panel-open');
-                if(isPanelFullscreen) section.classList.add('panel-fullscreen');
-                requestAnimationFrame(() => panel.classList.add('visible'));
-              });
-            }
-            grid.appendChild(cell);
-          });
-        });
-
-        // Legend
-        document.getElementById('legendCells').innerHTML=
-          ['cell-empty','cell-1','cell-2','cell-3','cell-4','cell-5'].map(c=>
-            `<div class="legend-cell" style="background:var(--${c})"></div>`).join('');
-
-        // Close panel
-        function closePanel() {
-          const panel = document.getElementById('dayPanel');
-          const section = document.getElementById('heatmapSection');
-          if(selectedCell){selectedCell.classList.remove('selected');selectedCell=null;}
-          selectedDateStr = null;
-          isPanelFullscreen = false;
-          updateFullscreenIcon();
-          panel.classList.add('closing');
-          panel.classList.remove('visible');
-          setTimeout(() => {
-            panel.classList.remove('closing');
-            section.classList.remove('panel-open','panel-fullscreen');
-          }, 320);
-        }
-        document.getElementById('closePanel').addEventListener('click', closePanel);
-
-        // Toggle buttons
-        document.getElementById('btnPie').addEventListener('click', () => {
-          currentViewMode = 'pie';
-          document.getElementById('btnPie').style.background = 'var(--color-primary)';
-          document.getElementById('btnPie').style.color = '#fff';
-          document.getElementById('btnHourly').style.background = 'var(--color-surface-offset)';
-          document.getElementById('btnHourly').style.color = 'var(--color-text)';
-          document.getElementById('btnHourly').style.color = 'var(--color-text)';
-          document.getElementById('hourlyViewContainer').style.display = 'none';
-          if (!selectedDateStr || (daily[selectedDateStr] || 0) === 0) {
-            // Empty day: keep noDataMsg visible, hide chart/legend
-            document.getElementById('pieViewContainer').style.display = 'none';
-            document.getElementById('noDataMsg').style.display = 'block';
-          } else {
-            document.getElementById('noDataMsg').style.display = 'none';
-            document.getElementById('pieViewContainer').style.display = 'flex';
-            document.getElementById('chartWrapPie').style.display = 'block';
-            document.getElementById('pieLegend').style.display = 'flex';
-            if(selectedDateStr) buildPieForDay(selectedDateStr);
-          }
-        });
-
-        document.getElementById('btnHourly').addEventListener('click', () => {
-          currentViewMode = 'hourly';
-          document.getElementById('btnHourly').style.background = 'var(--color-primary)';
-          document.getElementById('btnHourly').style.color = '#fff';
-          document.getElementById('btnPie').style.background = 'var(--color-surface-offset)';
-          document.getElementById('btnPie').style.color = 'var(--color-text)';
-          document.getElementById('pieViewContainer').style.display = 'none';
-          document.getElementById('hourlyViewContainer').style.display = 'none';
-          const bd = document.getElementById('hourBreakdown');
-          if (bd) {
-            bd.style.display = 'block';
-            bd.innerHTML = '<div style="text-align:center; padding:var(--space-4); color:var(--color-text-muted); font-size:var(--text-sm);">Click a bar to see player breakdown</div>';
-          }
-          if (!selectedDateStr || (daily[selectedDateStr] || 0) === 0) {
-            // Empty day: keep noDataMsg visible
-            document.getElementById('noDataMsg').style.display = 'block';
-          } else {
-            document.getElementById('noDataMsg').style.display = 'none';
-            document.getElementById('hourlyViewContainer').style.display = 'flex';
-            document.getElementById('chartWrapHourly').style.display = 'block'; // Ensure chart wrapper is visible
-            if(selectedDateStr) buildHourlyForDay(selectedDateStr);
-          }
-        });
-
-        // Fullscreen toggle
-        document.getElementById('fullscreenPanel').addEventListener('click', () => {
-          isPanelFullscreen = !isPanelFullscreen;
-          const section = document.getElementById('heatmapSection');
-          section.classList.toggle('panel-fullscreen', isPanelFullscreen);
-          updateFullscreenIcon();
-          // Redraw chart after transition so it fills new width, without re-animating
-          setTimeout(() => {
-            if(selectedDateStr) {
-              if(currentViewMode === 'pie') buildPieForDay(selectedDateStr, false);
-              else buildHourlyForDay(selectedDateStr, false);
-            }
-          }, 340);
-        });
-      }
-
-      function positionTooltip(e){
-        const t=document.getElementById('tooltip');
-        const tw=t.offsetWidth||220, th=t.offsetHeight||120;
-        let x=e.clientX+16, y=e.clientY-10;
-        if(x+tw>window.innerWidth-16) x=e.clientX-tw-16;
-        if(y+th>window.innerHeight-16) y=window.innerHeight-th-16;
-        t.style.left=x+'px'; t.style.top=y+'px';
-      }
-
-      function buildPlayerTable(){
-        const sorted=Object.entries(playerTotals).sort((a,b)=>b[1]-a[1]);
-        const rankSymbols=['🥇','🥈','🥉'];
-        document.getElementById('playerTableBody').innerHTML=sorted.map(([p,m],i)=>{
-          const hours=m/60;
-          const sd=sessData[p]||{};
-          const avgMin=sd.avg||0;
-          const avgFmt=avgMin<60?Math.round(avgMin)+'m':(avgMin/60).toFixed(1)+'h';
-          return `<tr onclick="showPlayerDetails('${p}')" style="cursor:pointer;">
-            <td style="display:flex;align-items:center;">
-              <span style="display:inline-block;width:28px;text-align:left;flex-shrink:0;">${i<3?`<span class="rank-badge ${rankClass[i]||''}">${i+1}</span>`:''}</span>
-              ${playerHead(p, 28)}
-              <span style="margin-left:var(--space-2)">${p}</span>
-            </td>
-            <td>${hours.toFixed(1)}h</td>
-            <td>${sd.sessions||'-'}</td>
-            <td>${avgFmt}</td>
-          </tr>`;
-        }).join('');
-      }
-
+      let chart = null;
+      let modalChart = null;
       let skinViewer = null;
 
-      function closePlayerModal() {
-        document.getElementById('playerModal').classList.remove('visible');
-      }
-
-      function showPlayerDetails(name) {
-        const meta = PLAYER_META[name] || {};
-        const sd = sessData[name] || {};
-        
-        document.getElementById('modalPlayerName').textContent = name;
-        document.getElementById('modalPlayerHead').innerHTML = playerHead(name, 32);
-        
-        // Calculate stats
-        const totalMinutes = playerTotals[name] || 0;
-        
-        // Peak month
-        const monthly = {};
-        for (const [date, players] of Object.entries(playerDailyRaw)) {
-          if (players[name]) {
-            const m = date.substring(0, 7); // YYYY-MM
-            monthly[m] = (monthly[m] || 0) + players[name];
-          }
-        }
-        const peakMonth = Object.entries(monthly).sort((a,b) => b[1]-a[1])[0];
-        let peakMonthFmt = '-';
-        if (peakMonth) {
-          const [y, m] = peakMonth[0].split('-');
-          const mnames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          peakMonthFmt = mnames[parseInt(m)-1] + ' ' + y;
-        }
-
-        // Peak hour (convert from UTC server time to browser local time)
-        const hourlyAccUtc = new Array(24).fill(0);
-        for (const [date, players] of Object.entries(hourly)) {
-          if (players[name]) {
-            players[name].forEach((mins, h) => { hourlyAccUtc[h] += mins; });
-          }
-        }
-        // Shift UTC hours to local timezone
-        const tzOffsetHours = new Date().getTimezoneOffset() / 60;
-        const hourlyAcc = new Array(24).fill(0);
-        for (let h = 0; h < 24; h++) {
-          const localH = ((h - tzOffsetHours) % 24 + 24) % 24;
-          hourlyAcc[localH] = hourlyAccUtc[h];
-        }
-        const peakHourIdx = hourlyAcc.indexOf(Math.max(...hourlyAcc));
-        let peakHourFmt = '-';
-        if (Math.max(...hourlyAcc) > 0) {
-          const h = peakHourIdx % 12 || 12;
-          const ampm = peakHourIdx < 12 ? 'am' : 'pm';
-          peakHourFmt = h + ampm;
-        }
-
-        const stats = [
-          { label: 'Total Playtime', value: fmtHours(totalMinutes/60), icon: '⏱️' },
-          { label: 'Sessions', value: sd.sessions || '0', icon: '🎮' },
-          { label: 'Avg Session', value: sd.avg < 60 ? Math.round(sd.avg)+'m' : (sd.avg/60).toFixed(1)+'h', icon: '📊' },
-          { label: 'Longest Session', value: sd.longestSession ? (sd.longestSession < 60 ? Math.round(sd.longestSession)+'m' : (sd.longestSession/60).toFixed(1)+'h') : '-', icon: '🏆' },
-          { label: 'Peak Hour', value: peakHourFmt, icon: '🔥' },
-          { label: 'Most Active Month', value: peakMonthFmt, icon: '📅' }
-        ];
-
-        document.getElementById('modalStats').innerHTML = stats.map(s => `
-          <div class="stat-card">
-            <div class="stat-icon">${s.icon}</div>
-            <div class="stat-label">${s.label}</div>
-            <div class="stat-value">${s.value}</div>
-          </div>
-        `).join('');
-
-        // Show modal
-        const modal = document.getElementById('playerModal');
-        modal.classList.add('visible');
-
-        // Initialize/Update SkinViewer
-        const skinCanvas = document.getElementById('skinViewerCanvas');
-        try {
-          if (!skinViewer) {
-            skinViewer = new skinview3d.SkinViewer({
-              canvas: skinCanvas,
-              width: 300,
-              height: 400
-            });
-            skinViewer.animation = new skinview3d.WalkingAnimation();
-            skinViewer.autoRotate = true;
-            skinViewer.autoRotateSpeed = 0.5;
-          }
-          
-          // Load skin from our own server (avoids CORS)
-          const skinUrl = `/skins/${encodeURIComponent(name)}.png`;
-          skinViewer.loadSkin(skinUrl)
-            .then(() => {})
-            .catch(err => console.warn('[SkinViewer] Skin load failed, using default:', err));
-          skinViewer.animation.paused = false;
-        } catch (err) {
-          console.error('[SkinViewer] FATAL:', err);
-          skinCanvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-muted);font-size:var(--text-sm);">3D viewer unavailable</div>';
-        }
-      }
-
-      window.addEventListener('keydown', e => {
-        if (e.key === 'Escape') closePlayerModal();
+      const themeToggle = document.getElementById('themeToggle');
+      themeToggle.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
       });
-
-      // Close modal on background click
-      document.getElementById('playerModal').addEventListener('click', (e) => {
-        if (e.target.id === 'playerModal') {
-          closePlayerModal();
-        }
-      });
-
-      const rankClass = ['rank-1', 'rank-2', 'rank-3'];
 
       async function loadPlayerMeta() {
         try {
           const res = await fetch('/api/player-meta');
-          PLAYER_META = await res.json();
-        } catch(e) {
-          console.warn('Could not load player meta, using fallback colors');
-        }
+          playerMeta = await res.json();
+        } catch(e) { console.warn("Meta load fail", e); }
+      }
+
+      function getPlayerColor(name) {
+        if (playerMeta[name] && playerMeta[name].hexColor) return playerMeta[name].hexColor;
+        return 'var(--color-primary)';
+      }
+
+      function formatTime(mins) {
+        if (mins < 60) return mins.toFixed(0) + 'm';
+        const h = Math.floor(mins/60);
+        const m = Math.round(mins % 60);
+        return h + 'h ' + (m > 0 ? m + 'm' : '');
       }
 
       async function loadActivity() {
@@ -1106,10 +384,318 @@
           const res = await fetch('/api/activity');
           const data = await res.json();
 
-          // Hardcoded fallback list merged with server-side config for robustness
-          const HARDCODED_IGNORE = ['ironfarmbot', 'mobfarmbot', 'einensoenenabend'];
-          const serverIgnored = (data.ignored_players || []).map(s => s.toLowerCase());
-          const ignoredList = [...new Set([...HARDCODED_IGNORE, ...serverIgnored])];
+          const ignoredList = (data.ignored_players || []).map(s => s.toLowerCase());
+
+          daily = data.daily || {};
+          playerDailyRaw = data.playerDailyRaw || {};
+          sessData = data.sessData || {};
+          hourly = data.hourly || {};
+
+          // Filter out ignored players if any (double-safety for cached API responses)
+          if (ignoredList.length > 0) {
+            for (let d in playerDailyRaw) {
+              for (let p in playerDailyRaw[d]) {
+                if (ignoredList.includes(p.toLowerCase())) delete playerDailyRaw[d][p];
+              }
+            }
+            for (let p in sessData) {
+              if (ignoredList.includes(p.toLowerCase())) delete sessData[p];
+            }
+            for (let d in hourly) {
+              for (let p in hourly[d]) {
+                if (ignoredList.includes(p.toLowerCase())) delete hourly[d][p];
+              }
+            }
+            // Recalculate daily totals from filtered playerDailyRaw
+            for (let d in playerDailyRaw) {
+              const sum = Object.values(playerDailyRaw[d]).reduce((a,b) => a+b, 0);
+              daily[d] = Math.round((sum / 60) * 100) / 100;
+            }
+          }
+
+          playerTotals = {};
+          Object.values(playerDailyRaw).forEach(day => {
+            Object.entries(day).forEach(([p,m]) => { playerTotals[p] = (playerTotals[p]||0)+m; });
+          });
+          ranked = Object.entries(playerTotals).sort((a,b)=>b[1]-a[1]);
+
+          buildKPIs();
+          buildCalendar();
+          buildPlayerTable();
+        } catch (e) {
+          console.error("Failed to load activity:", e);
+        }
+      }
+
+      function buildKPIs() {
+        const dates = Object.keys(daily).sort();
+        document.getElementById('stat-days').textContent = dates.length;
+        
+        const totalMin = Object.values(playerTotals).reduce((a,b)=>a+b, 0);
+        document.getElementById('stat-total-time').textContent = formatTime(totalMin);
+        
+        document.getElementById('stat-active-players').textContent = Object.keys(playerTotals).length;
+
+        // Peak Hour
+        let hourCounts = Array(24).fill(0);
+        Object.values(hourly).forEach(day => {
+          Object.entries(day).forEach(([p, hours]) => {
+            hours.forEach(h => { if(h>=0 && h<24) hourCounts[h]++; });
+          });
+        });
+        const peak = hourCounts.indexOf(Math.max(...hourCounts));
+        const h12 = peak % 12 || 12;
+        const ampm = peak >= 12 ? 'PM' : 'AM';
+        document.getElementById('stat-peak-hour').textContent = `${h12} ${ampm}`;
+
+        // Latest Player
+        let allSess = [];
+        Object.entries(sessData).forEach(([p, list]) => {
+          list.forEach(s => allSess.push({p, end: s.end}));
+        });
+        allSess.sort((a,b)=>new Date(b.end) - new Date(a.end));
+        if(allSess.length > 0) {
+          document.getElementById('stat-latest-player').textContent = allSess[0].p;
+        }
+
+        // Avg session
+        let totalSessions = allSess.length;
+        document.getElementById('stat-avg-session').textContent = totalSessions > 0 ? (totalMin/totalSessions).toFixed(1) + 'm' : '-';
+      }
+
+      function buildCalendar() {
+        const grid = document.getElementById('heatmapGrid');
+        grid.innerHTML = '';
+        
+        const now = new Date();
+        const start = new Date(now);
+        start.setDate(now.getDate() - (9 * 7) + 1);
+        while(start.getDay() !== 1) { start.setDate(start.getDate() - 1); }
+
+        for(let i=0; i<9; i++) {
+          const weekLabel = document.createElement('div');
+          weekLabel.className = 'week-label';
+          const weekDate = new Date(start);
+          weekDate.setDate(start.getDate() + (i*7));
+          weekLabel.textContent = weekDate.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+          grid.appendChild(weekLabel);
+
+          for(let d=0; d<7; d++) {
+            const current = new Date(start);
+            current.setDate(start.getDate() + (i*7) + d);
+            const dateStr = current.toISOString().split('T')[0];
+            const val = daily[dateStr] || 0;
+
+            const cell = document.createElement('div');
+            cell.className = 'day-cell';
+            if(dateStr === now.toISOString().split('T')[0]) cell.classList.add('today');
+
+            let level = 0;
+            if(val > 0) level = 1;
+            if(val > 2) level = 2;
+            if(val > 5) level = 3;
+            if(val > 10) level = 4;
+            if(val > 20) level = 5;
+            if(level > 0) cell.style.background = `var(--cell-${level})`;
+
+            cell.title = `${dateStr}: ${val.toFixed(1)} hours`;
+            cell.addEventListener('click', () => showDay(dateStr));
+            grid.appendChild(cell);
+          }
+        }
+      }
+
+      function showDay(date) {
+        document.querySelectorAll('.day-cell').forEach(c => c.classList.remove('active'));
+        const target = [...document.querySelectorAll('.day-cell')].find(c => c.title.startsWith(date));
+        if(target) target.classList.add('active');
+
+        const panel = document.getElementById('sidePanel');
+        const section = document.getElementById('heatmapSection');
+        section.classList.add('panel-open');
+        document.getElementById('panelTitle').textContent = new Date(date).toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'});
+
+        // Table
+        const tbody = document.querySelector('#panelTable tbody');
+        tbody.innerHTML = '';
+        const dayData = playerDailyRaw[date] || {};
+        Object.entries(dayData).sort((a,b)=>b[1]-a[1]).forEach(([p,m]) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td><div class="player-cell"><div class="player-avatar"><img src="/faces/${p}.png" width="32"></div>${p}</div></td><td>${m.toFixed(0)}</td>`;
+          tr.onclick = () => showPlayer(p);
+          tbody.appendChild(tr);
+        });
+
+        // Chart
+        const hourData = Array(24).fill(0);
+        const dayHourly = hourly[date] || {};
+        Object.values(dayHourly).forEach(hours => {
+          hours.forEach(h => { if(h>=0 && h<24) hourData[h]++; });
+        });
+
+        const ctx = document.getElementById('hourlyChart').getContext('2d');
+        if(chart) chart.destroy();
+        chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: Array.from({length:24}, (_,i) => {
+              const h = i % 12 || 12;
+              return h + (i >= 12 ? 'p' : 'a');
+            }),
+            datasets: [{
+              label: 'Players Online',
+              data: hourData,
+              backgroundColor: 'oklch(from var(--color-primary) l c h / 0.6)',
+              borderColor: 'var(--color-primary)',
+              borderWidth: 1,
+              borderRadius: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: 'var(--color-divider)' }, ticks: { stepSize: 1, color: 'var(--color-text-faint)' } },
+              x: { grid: { display: false }, ticks: { color: 'var(--color-text-faint)', font: { size: 10 } } }
+            }
+          }
+        });
+      }
+
+      document.getElementById('closePanel').onclick = () => {
+        document.getElementById('heatmapSection').classList.remove('panel-open');
+      };
+
+      function buildPlayerTable() {
+        const tbody = document.querySelector('#leaderboard tbody');
+        tbody.innerHTML = '';
+        const max = ranked[0][1];
+
+        ranked.forEach(([p, m], i) => {
+          const tr = document.createElement('tr');
+          const rank = i + 1;
+          const pct = (m / max) * 100;
+          const color = getPlayerColor(p);
+          
+          tr.innerHTML = `
+            <td><div class="rank-badge rank-${rank <= 3 ? rank : 'other'}">${rank}</div></td>
+            <td>
+              <div class="player-cell">
+                <div class="player-avatar"><img src="/faces/${p}.png" width="32"></div>
+                <span class="player-name">${p}</span>
+              </div>
+            </td>
+            <td><span style="font-weight:700">${formatTime(m)}</span></td>
+            <td>
+              <div class="playtime-bar-bg">
+                <div class="playtime-bar-fill" style="width:0%; background-color:${color}"></div>
+              </div>
+            </td>
+          `;
+          tr.onclick = () => showPlayer(p);
+          tbody.appendChild(tr);
+          setTimeout(() => {
+            tr.querySelector('.playtime-bar-fill').style.width = pct + '%';
+          }, 100);
+        });
+      }
+
+      function showPlayer(name) {
+        const overlay = document.getElementById('modalOverlay');
+        const modal = document.getElementById('modalContent');
+        
+        document.getElementById('modalPlayerName').textContent = name;
+        document.getElementById('mstat-total').textContent = formatTime(playerTotals[name] || 0);
+        
+        const sessions = sessData[name] || [];
+        document.getElementById('mstat-sessions').textContent = sessions.length;
+        document.getElementById('mstat-avg').textContent = sessions.length > 0 ? (playerTotals[name] / sessions.length).toFixed(1) + 'm' : '0m';
+        
+        if (sessions.length > 0) {
+          const last = new Date(sessions[sessions.length-1].end);
+          document.getElementById('mstat-last').textContent = last.toLocaleString();
+        } else {
+          document.getElementById('mstat-last').textContent = 'Never';
+        }
+
+        // Sessions Table
+        const tbody = document.querySelector('#modalSessionsTable tbody');
+        tbody.innerHTML = '';
+        [...sessions].reverse().slice(0, 10).forEach(s => {
+          const tr = document.createElement('tr');
+          const dur = (new Date(s.end) - new Date(s.start)) / 60000;
+          tr.innerHTML = `<td>${new Date(s.start).toLocaleDateString()}</td><td>${dur.toFixed(0)}m</td>`;
+          tbody.appendChild(tr);
+        });
+
+        // Hourly Chart
+        const hourData = Array(24).fill(0);
+        Object.values(hourly).forEach(day => {
+          if (day[name]) day[name].forEach(h => { if(h>=0 && h<24) hourData[h]++; });
+        });
+
+        const ctx = document.getElementById('modalChart').getContext('2d');
+        if(modalChart) modalChart.destroy();
+        modalChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: Array.from({length:24}, (_,i) => i),
+            datasets: [{
+              label: 'Frequency',
+              data: hourData,
+              fill: true,
+              backgroundColor: 'oklch(from var(--color-primary) l c h / 0.1)',
+              borderColor: 'var(--color-primary)',
+              tension: 0.4,
+              pointRadius: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: 'var(--color-divider)' }, ticks: { display: false } },
+              x: { grid: { display: false }, ticks: { color: 'var(--color-text-faint)', callback: (v) => v % 6 === 0 ? v+':00' : '' } }
+            }
+          }
+        });
+
+        // 3D Skin
+        if (!skinViewer) {
+          skinViewer = new skinview3d.SkinViewer({
+            canvas: document.createElement('canvas'),
+            width: 200,
+            height: 320
+          });
+          document.getElementById('skinViewer').appendChild(skinViewer.canvas);
+          skinViewer.animations.add(skinview3d.WalkingAnimation);
+        }
+        skinViewer.loadSkin(`/skins/${name}.png`).catch(() => {
+          skinViewer.loadSkin('https://mineskin.org/assets/img/steve.png');
+        });
+
+        overlay.classList.add('active');
+      }
+
+      function closeModal() {
+        document.getElementById('modalOverlay').classList.remove('active');
+      }
+      document.getElementById('closeModal').onclick = closeModal;
+      document.getElementById('modalOverlay').onclick = (e) => {
+        if(e.target === document.getElementById('modalOverlay')) closeModal();
+      };
+
+      async function loadActivity() {
+        try {
+          // Load skin-derived colors first
+          await loadPlayerMeta();
+
+          const res = await fetch('/api/activity');
+          const data = await res.json();
+
+          const ignoredList = (data.ignored_players || []).map(s => s.toLowerCase());
 
           daily = data.daily || {};
           playerDailyRaw = data.playerDailyRaw || {};
