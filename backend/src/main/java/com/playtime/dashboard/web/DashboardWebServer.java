@@ -81,8 +81,7 @@ public class DashboardWebServer {
                     FabricDashboardMod.LOGGER.info("Found existing cache file at " + cacheFile.getAbsolutePath() + ". Skipping historical parse.");
                 }
 
-                // Trigger head fetches once after the startup parse — not on every incremental update.
-                // New players discovered later will have their heads fetched on-demand by the FaceHandler.
+                // Trigger head fetches once after the startup parse
                 triggerHeadFetches();
 
                 long delay = DashboardConfig.get().incremental_update_interval_minutes;
@@ -110,7 +109,6 @@ public class DashboardWebServer {
             JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
             Set<String> playerNames = new HashSet<>();
 
-            // Collect player names from playerDailyRaw
             if (data.has("playerDailyRaw")) {
                 JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
                 for (String dateKey : pdr.keySet()) {
@@ -119,7 +117,6 @@ public class DashboardWebServer {
                 }
             }
 
-            // Also from sessData
             if (data.has("sessData")) {
                 playerNames.addAll(data.getAsJsonObject("sessData").keySet());
             }
@@ -134,15 +131,9 @@ public class DashboardWebServer {
     }
 
     public void stop() {
-        if (httpServer != null) {
-            httpServer.stop(0);
-        }
-        if (scheduler != null) {
-            scheduler.shutdownNow();
-        }
-        if (headService != null) {
-            headService.shutdown();
-        }
+        if (httpServer != null) httpServer.stop(0);
+        if (scheduler != null) scheduler.shutdownNow();
+        if (headService != null) headService.shutdown();
     }
 
     private static class HtmlHandler implements HttpHandler {
@@ -157,18 +148,13 @@ public class DashboardWebServer {
             
             if (path.equals("/server-logo.jpg")) {
                 try (InputStream is = getClass().getResourceAsStream("/web/server-logo.jpg")) {
-                    if (is == null) {
-                        exchange.sendResponseHeaders(404, -1);
-                        return;
-                    }
+                    if (is == null) { exchange.sendResponseHeaders(404, -1); return; }
                     exchange.getResponseHeaders().set("Content-Type", "image/jpeg");
                     exchange.sendResponseHeaders(200, 0);
                     try (OutputStream os = exchange.getResponseBody()) {
                         byte[] buffer = new byte[8192];
                         int bytesRead;
-                        while ((bytesRead = is.read(buffer)) != -1) {
-                            os.write(buffer, 0, bytesRead);
-                        }
+                        while ((bytesRead = is.read(buffer)) != -1) os.write(buffer, 0, bytesRead);
                     }
                 }
                 return;
@@ -183,9 +169,7 @@ public class DashboardWebServer {
                 if (is == null) {
                     String error = "HTML file not found in mod resources.";
                     exchange.sendResponseHeaders(500, error.length());
-                    try (OutputStream os = exchange.getResponseBody()) {
-                        os.write(error.getBytes());
-                    }
+                    try (OutputStream os = exchange.getResponseBody()) { os.write(error.getBytes()); }
                     return;
                 }
                 
@@ -198,9 +182,7 @@ public class DashboardWebServer {
                 try (OutputStream os = exchange.getResponseBody()) {
                     byte[] buffer = new byte[8192];
                     int bytesRead;
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        os.write(buffer, 0, bytesRead);
-                    }
+                    while ((bytesRead = is.read(buffer)) != -1) os.write(buffer, 0, bytesRead);
                 }
             }
         }
@@ -209,127 +191,70 @@ public class DashboardWebServer {
     /** Serves cached player face PNGs from disk. */
     private static class FaceHandler implements HttpHandler {
         private final PlayerHeadService headService;
-
-        public FaceHandler(PlayerHeadService headService) {
-            this.headService = headService;
-        }
+        public FaceHandler(PlayerHeadService headService) { this.headService = headService; }
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
-                exchange.sendResponseHeaders(405, -1);
-                return;
-            }
-
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) { exchange.sendResponseHeaders(405, -1); return; }
             String path = exchange.getRequestURI().getPath();
-            // Extract player name from /faces/<playerName>.png
             String filename = path.substring("/faces/".length());
-            if (!filename.endsWith(".png")) {
-                exchange.sendResponseHeaders(404, -1);
-                return;
-            }
+            if (!filename.endsWith(".png")) { exchange.sendResponseHeaders(404, -1); return; }
             String playerName = filename.substring(0, filename.length() - 4);
-
-            // Special-case: serve default_head directly from pre-loaded bytes
-            // This prevents the fallback-for-the-fallback problem
-            if (playerName.equals("default_head")) {
-                serveDefaultHead(exchange);
-                return;
-            }
-
-            // Sanitize player name — only allow word characters, slash, and hyphen
-            if (!playerName.matches("[\\w/\\-]+")) {
-                exchange.sendResponseHeaders(400, -1);
-                return;
-            }
+            if (playerName.equals("default_head")) { serveDefaultHead(exchange); return; }
+            if (!playerName.matches("[\\w/\\-]+")) { exchange.sendResponseHeaders(400, -1); return; }
 
             File faceFile = headService.getFaceFile(playerName);
-
             exchange.getResponseHeaders().set("Content-Type", "image/png");
             exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
-
-            // Always trigger a background fetch check (it will return quickly if fresh)
             headService.fetchIfNeeded(playerName);
 
             if (faceFile != null && faceFile.exists()) {
                 exchange.sendResponseHeaders(200, faceFile.length());
-                try (InputStream is = new FileInputStream(faceFile);
-                     OutputStream os = exchange.getResponseBody()) {
-                    byte[] buffer = new byte[4096];
-                    int bytesRead;
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        os.write(buffer, 0, bytesRead);
-                    }
+                try (InputStream is = new FileInputStream(faceFile); OutputStream os = exchange.getResponseBody()) {
+                    byte[] buffer = new byte[4096]; int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) os.write(buffer, 0, bytesRead);
                 }
             } else {
-                // Serve default head from pre-loaded bytes
                 serveDefaultHead(exchange);
             }
         }
 
         private void serveDefaultHead(HttpExchange exchange) throws IOException {
             byte[] defaultBytes = headService.getDefaultHeadBytes();
-            if (defaultBytes == null) {
-                exchange.sendResponseHeaders(404, -1);
-                return;
-            }
+            if (defaultBytes == null) { exchange.sendResponseHeaders(404, -1); return; }
             exchange.getResponseHeaders().set("Content-Type", "image/png");
             exchange.getResponseHeaders().set("Cache-Control", "public, max-age=86400");
             exchange.sendResponseHeaders(200, defaultBytes.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(defaultBytes);
-            }
+            try (OutputStream os = exchange.getResponseBody()) { os.write(defaultBytes); }
         }
     }
 
     /** Serves cached full skin PNGs for the 3D viewer. Same-origin avoids CORS. */
     private static class SkinHandler implements HttpHandler {
         private final PlayerHeadService headService;
-
-        public SkinHandler(PlayerHeadService headService) {
-            this.headService = headService;
-        }
+        public SkinHandler(PlayerHeadService headService) { this.headService = headService; }
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
-                exchange.sendResponseHeaders(405, -1);
-                return;
-            }
-
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) { exchange.sendResponseHeaders(405, -1); return; }
             String path = exchange.getRequestURI().getPath();
             String filename = path.substring("/skins/".length());
-            if (!filename.endsWith(".png")) {
-                exchange.sendResponseHeaders(404, -1);
-                return;
-            }
+            if (!filename.endsWith(".png")) { exchange.sendResponseHeaders(404, -1); return; }
             String playerName = filename.substring(0, filename.length() - 4);
-
-            if (!playerName.matches("[\\w/\\-]+")) {
-                exchange.sendResponseHeaders(400, -1);
-                return;
-            }
+            if (!playerName.matches("[\\w/\\-]+")) { exchange.sendResponseHeaders(400, -1); return; }
 
             File skinFile = headService.getFullSkinFile(playerName);
-
             exchange.getResponseHeaders().set("Content-Type", "image/png");
             exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
-
-            // Always trigger a background fetch check
             headService.fetchIfNeeded(playerName);
 
             if (skinFile != null && skinFile.exists()) {
                 exchange.sendResponseHeaders(200, skinFile.length());
-                try (InputStream is = new FileInputStream(skinFile);
-                     OutputStream os = exchange.getResponseBody()) {
-                    byte[] buffer = new byte[4096];
-                    int bytesRead;
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        os.write(buffer, 0, bytesRead);
-                    }
+                try (InputStream is = new FileInputStream(skinFile); OutputStream os = exchange.getResponseBody()) {
+                    byte[] buffer = new byte[4096]; int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) os.write(buffer, 0, bytesRead);
                 }
             } else {
-                // No cached full skin — return 404; frontend will show default model
                 exchange.sendResponseHeaders(404, -1);
             }
         }
@@ -339,46 +264,30 @@ public class DashboardWebServer {
     private static class PlayerMetaHandler implements HttpHandler {
         private final PlayerHeadService headService;
         private static final Gson GSON = new Gson();
-
-        public PlayerMetaHandler(PlayerHeadService headService) {
-            this.headService = headService;
-        }
+        public PlayerMetaHandler(PlayerHeadService headService) { this.headService = headService; }
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
-                exchange.sendResponseHeaders(405, -1);
-                return;
-            }
-
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) { exchange.sendResponseHeaders(405, -1); return; }
             Map<String, PlayerHeadService.PlayerMeta> metaMap = headService.getColorMap();
             byte[] json = GSON.toJson(metaMap).getBytes(StandardCharsets.UTF_8);
-
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
             exchange.getResponseHeaders().set("Pragma", "no-cache");
             exchange.getResponseHeaders().set("Expires", "0");
             exchange.sendResponseHeaders(200, json.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(json);
-            }
+            try (OutputStream os = exchange.getResponseBody()) { os.write(json); }
         }
     }
 
     private static class ApiHandler implements HttpHandler {
         private final File cacheFile;
         private static final Gson GSON = new Gson();
-
-        public ApiHandler(File cacheFile) {
-            this.cacheFile = cacheFile;
-        }
+        public ApiHandler(File cacheFile) { this.cacheFile = cacheFile; }
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
-                exchange.sendResponseHeaders(405, -1);
-                return;
-            }
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) { exchange.sendResponseHeaders(405, -1); return; }
             
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -388,9 +297,7 @@ public class DashboardWebServer {
             if (!cacheFile.exists()) {
                 String emptyJson = "{\"daily\":{},\"playerDailyRaw\":{},\"sessData\":{},\"hourly\":{}}";
                 exchange.sendResponseHeaders(200, emptyJson.length());
-                try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(emptyJson.getBytes());
-                }
+                try (OutputStream os = exchange.getResponseBody()) { os.write(emptyJson.getBytes()); }
                 return;
             }
 
@@ -402,60 +309,44 @@ public class DashboardWebServer {
                     Set<String> ignoreSet = new HashSet<>();
                     for (String s : ignored) ignoreSet.add(s.toLowerCase());
 
-                    // Filter sessData
                     if (data.has("sessData")) {
                         JsonObject sess = data.getAsJsonObject("sessData");
                         List<String> toRemove = new ArrayList<>();
-                        for (String p : sess.keySet()) {
-                            if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
-                        }
+                        for (String p : sess.keySet()) { if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p); }
                         for (String p : toRemove) sess.remove(p);
                     }
 
-                    // Filter playerDailyRaw and collect for daily recalculation
                     Map<String, Double> newDaily = new HashMap<>();
                     if (data.has("playerDailyRaw")) {
                         JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
                         for (String date : pdr.keySet()) {
                             JsonObject dayMap = pdr.getAsJsonObject(date);
                             List<String> toRemove = new ArrayList<>();
-                            for (String p : dayMap.keySet()) {
-                                if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
-                            }
+                            for (String p : dayMap.keySet()) { if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p); }
                             for (String p : toRemove) dayMap.remove(p);
-                            
                             double sumMinutes = 0;
-                            for (String p : dayMap.keySet()) {
-                                sumMinutes += dayMap.get(p).getAsDouble();
-                            }
+                            for (String p : dayMap.keySet()) sumMinutes += dayMap.get(p).getAsDouble();
                             newDaily.put(date, Math.round((sumMinutes / 60.0) * 100.0) / 100.0);
                         }
                     }
 
-                    // Filter hourly
                     if (data.has("hourly")) {
                         JsonObject hly = data.getAsJsonObject("hourly");
                         for (String date : hly.keySet()) {
                             JsonObject dayMap = hly.getAsJsonObject(date);
                             List<String> toRemove = new ArrayList<>();
-                            for (String p : dayMap.keySet()) {
-                                if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
-                            }
+                            for (String p : dayMap.keySet()) { if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p); }
                             for (String p : toRemove) dayMap.remove(p);
                         }
                     }
 
-                    // Overwrite daily totals with filtered ones
                     data.add("daily", GSON.toJsonTree(newDaily));
-                    // Include the ignored list in the response for the frontend to be extra sure
                     data.add("ignored_players", GSON.toJsonTree(ignored));
                 }
 
                 byte[] json = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
                 exchange.sendResponseHeaders(200, json.length);
-                try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(json);
-                }
+                try (OutputStream os = exchange.getResponseBody()) { os.write(json); }
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to serve filtered API activity", e);
                 exchange.sendResponseHeaders(500, -1);
