@@ -183,6 +183,8 @@
       .player-table td{padding:var(--space-3) var(--space-4);font-size:var(--text-sm);
         border-bottom:1px solid oklch(from var(--color-text) l c h/0.05);}
       .player-table tr:last-child td{border-bottom:none;}
+      .player-table tr { transition: background var(--transition); }
+      .player-table tr:hover td { background: var(--color-surface-dynamic); }
       .player-color-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:var(--space-2);vertical-align:middle;}
       .rank-badge{display:inline-flex;align-items:center;justify-content:center;
         width:20px;height:20px;border-radius:var(--radius-full);font-size:10px;font-weight:700;
@@ -1078,6 +1080,13 @@
         if (e.key === 'Escape') closePlayerModal();
       });
 
+      // Close modal on background click
+      document.getElementById('playerModal').addEventListener('click', (e) => {
+        if (e.target.id === 'playerModal') {
+          closePlayerModal();
+        }
+      });
+
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
 
       async function loadPlayerMeta() {
@@ -1097,10 +1106,37 @@
           const res = await fetch('/api/activity');
           const data = await res.json();
 
+          // Hardcoded fallback list merged with server-side config for robustness
+          const HARDCODED_IGNORE = ['ironfarmbot', 'mobfarmbot', 'einensoenenabend'];
+          const serverIgnored = (data.ignored_players || []).map(s => s.toLowerCase());
+          const ignoredList = [...new Set([...HARDCODED_IGNORE, ...serverIgnored])];
+
           daily = data.daily || {};
           playerDailyRaw = data.playerDailyRaw || {};
           sessData = data.sessData || {};
           hourly = data.hourly || {};
+
+          // Filter out ignored players if any (double-safety for cached API responses)
+          if (ignoredList.length > 0) {
+            for (let d in playerDailyRaw) {
+              for (let p in playerDailyRaw[d]) {
+                if (ignoredList.includes(p.toLowerCase())) delete playerDailyRaw[d][p];
+              }
+            }
+            for (let p in sessData) {
+              if (ignoredList.includes(p.toLowerCase())) delete sessData[p];
+            }
+            for (let d in hourly) {
+              for (let p in hourly[d]) {
+                if (ignoredList.includes(p.toLowerCase())) delete hourly[d][p];
+              }
+            }
+            // Recalculate daily totals from filtered playerDailyRaw
+            for (let d in playerDailyRaw) {
+              const sum = Object.values(playerDailyRaw[d]).reduce((a,b) => a+b, 0);
+              daily[d] = Math.round((sum / 60) * 100) / 100;
+            }
+          }
 
           playerTotals = {};
           Object.values(playerDailyRaw).forEach(day => {

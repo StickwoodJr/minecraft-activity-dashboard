@@ -4,6 +4,7 @@ Minecraft server activity dashboard — Java Fabric mod backend with an embedded
 # Code Conventions
 - **Java**: Standard Java formatting, Javadoc for public classes and endpoints
 - **JS/HTML**: Prettier formatting, no inline styles, semantic HTML
+- **Caching**: Use `Cache-Control: no-cache` headers for dynamic JSON and HTML. Append version strings (e.g., `?v=2`) to resource URLs when significant logic changes to force client-side refreshes.
 - **Filenames**: kebab-case for all new frontend and documentation files
 
 # Folder Conventions
