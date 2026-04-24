@@ -406,7 +406,7 @@
         if (!btn) return;
         btn.innerHTML = isPanelFullscreen
           ? `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 1H1v3M9 1h3v3M9 12h3V9M4 12H1V9"/></svg>`
-          : `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 5V1h4M8 1h4v4M12 8v4H8M5 12H1V8" /></svg>`;
+          : `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 5V1h4M8 1h4v4M12 8v4H8M5 12H1V8"/></svg>`;
         btn.title = isPanelFullscreen ? 'Collapse panel' : 'Expand panel';
       }
 
@@ -1106,7 +1106,10 @@
           const res = await fetch('/api/activity');
           const data = await res.json();
 
-          const ignoredList = (data.ignored_players || []).map(s => s.toLowerCase());
+          // Hardcoded fallback list merged with server-side config for robustness
+          const HARDCODED_IGNORE = ['ironfarmbot', 'mobfarmbot', 'einensoenenabend'];
+          const serverIgnored = (data.ignored_players || []).map(s => s.toLowerCase());
+          const ignoredList = [...new Set([...HARDCODED_IGNORE, ...serverIgnored])];
 
           daily = data.daily || {};
           playerDailyRaw = data.playerDailyRaw || {};
@@ -1127,6 +1130,11 @@
               for (let p in hourly[d]) {
                 if (ignoredList.includes(p.toLowerCase())) delete hourly[d][p];
               }
+            }
+            // Recalculate daily totals from filtered playerDailyRaw
+            for (let d in playerDailyRaw) {
+              const sum = Object.values(playerDailyRaw[d]).reduce((a,b) => a+b, 0);
+              daily[d] = Math.round((sum / 60) * 100) / 100;
             }
           }
 
