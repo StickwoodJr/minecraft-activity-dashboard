@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "fabric-dashboard",
+  "version": "${version}",
+  "name": "Fabric Activity Dashboard",
+  "description": "Port of the Minecraft Activity Dashboard to a Fabric mod.",
+  "authors": [
+    "Gemini"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.playtime.dashboard.FabricDashboardMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
