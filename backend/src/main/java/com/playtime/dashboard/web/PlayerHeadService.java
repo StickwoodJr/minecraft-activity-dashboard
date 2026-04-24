@@ -111,11 +111,19 @@ public class PlayerHeadService {
         if (!DashboardConfig.get().fetch_player_heads) return;
         PlayerMeta existing = metaMap.get(playerName);
         if (existing != null) {
-            long ttlMs = existing.fetchFailed
-                    ? FAILED_FETCH_TTL_MS
-                    : DashboardConfig.get().skin_refresh_hours * 3600_000L;
-            if ((System.currentTimeMillis() - existing.lastFetchedEpoch) < ttlMs) {
-                return; // still fresh (or still within retry cooldown)
+            // Force re-fetch if full skin file is missing (new feature migration)
+            File skinFile = new File(facesDir, sanitizeFilename(playerName) + "_skin.png");
+            boolean needsSkinFile = !skinFile.exists();
+
+            if (needsSkinFile) {
+                FabricDashboardMod.LOGGER.info("Forcing re-fetch for " + playerName + " because full skin is missing.");
+            } else {
+                long ttlMs = existing.fetchFailed
+                        ? FAILED_FETCH_TTL_MS
+                        : DashboardConfig.get().skin_refresh_hours * 3600_000L;
+                if ((System.currentTimeMillis() - existing.lastFetchedEpoch) < ttlMs) {
+                    return; // still fresh (or still within retry cooldown)
+                }
             }
         }
 
@@ -142,6 +150,12 @@ public class PlayerHeadService {
     /** Returns the cached face PNG file for a player, or null if not yet fetched. */
     public File getFaceFile(String playerName) {
         File f = new File(facesDir, sanitizeFilename(playerName) + ".png");
+        return f.exists() ? f : null;
+    }
+
+    /** Returns the cached full skin PNG file for a player, or null if not yet fetched. */
+    public File getFullSkinFile(String playerName) {
+        File f = new File(facesDir, sanitizeFilename(playerName) + "_skin.png");
         return f.exists() ? f : null;
     }
 
@@ -293,6 +307,10 @@ public class PlayerHeadService {
         // Write face PNG to disk
         File outFile = new File(facesDir, sanitizeFilename(playerName) + ".png");
         ImageIO.write(result, "PNG", outFile);
+
+        // Write full skin PNG to disk for the 3D viewer
+        File skinFile = new File(facesDir, sanitizeFilename(playerName) + "_skin.png");
+        ImageIO.write(skin, "PNG", skinFile);
 
         // Update meta
         PlayerMeta meta = new PlayerMeta();

@@ -6,7 +6,7 @@
     <title>MC Server — Player Activity Heatmap</title>
     <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/skinview3d@3.0.0/dist/bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/skinview3d@3.0.0/bundles/skinview3d.bundle.js"></script>
     <style>
       :root,[data-theme="light"]{
         --color-bg:#f7f6f2;--color-surface:#f9f8f5;--color-surface-2:#fbfbf9;
@@ -227,8 +227,9 @@
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         padding: var(--space-8); position: relative;
       }
-      #skinViewer { width: 100%; aspect-ratio: 1/1.2; cursor: grab; }
-      #skinViewer:active { cursor: grabbing; }
+      #skinViewerWrap { width: 100%; aspect-ratio: 3/4; cursor: grab; position: relative; }
+      #skinViewerWrap:active { cursor: grabbing; }
+      #skinViewerCanvas { width: 100% !important; height: 100% !important; display: block; }
       .modal-info-side { padding: var(--space-8); display: flex; flex-direction: column; gap: var(--space-6); }
       .modal-player-header { display: flex; align-items: center; gap: var(--space-4); }
       .modal-player-name { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.02em; }
@@ -359,7 +360,7 @@
         <div class="modal-content">
           <button class="modal-close" onclick="closePlayerModal()">✕</button>
           <div class="modal-viewer-side">
-            <div id="skinViewer"></div>
+            <div id="skinViewerWrap"><canvas id="skinViewerCanvas"></canvas></div>
           </div>
           <div class="modal-info-side">
             <div class="modal-player-header">
@@ -1004,12 +1005,19 @@
           peakMonthFmt = mnames[parseInt(m)-1] + ' ' + y;
         }
 
-        // Peak hour
-        const hourlyAcc = new Array(24).fill(0);
+        // Peak hour (convert from UTC server time to browser local time)
+        const hourlyAccUtc = new Array(24).fill(0);
         for (const [date, players] of Object.entries(hourly)) {
           if (players[name]) {
-            players[name].forEach((mins, h) => { hourlyAcc[h] += mins; });
+            players[name].forEach((mins, h) => { hourlyAccUtc[h] += mins; });
           }
+        }
+        // Shift UTC hours to local timezone
+        const tzOffsetHours = new Date().getTimezoneOffset() / 60;
+        const hourlyAcc = new Array(24).fill(0);
+        for (let h = 0; h < 24; h++) {
+          const localH = ((h - tzOffsetHours) % 24 + 24) % 24;
+          hourlyAcc[localH] = hourlyAccUtc[h];
         }
         const peakHourIdx = hourlyAcc.indexOf(Math.max(...hourlyAcc));
         let peakHourFmt = '-';
@@ -1041,20 +1049,29 @@
         modal.classList.add('visible');
 
         // Initialize/Update SkinViewer
-        if (!skinViewer) {
-          skinViewer = new skinview3d.SkinViewer({
-            canvas: document.createElement('canvas'),
-            width: 300,
-            height: 400,
-            animation: new skinview3d.WalkingAnimation()
-          });
-          document.getElementById('skinViewer').appendChild(skinViewer.canvas);
+        const skinCanvas = document.getElementById('skinViewerCanvas');
+        try {
+          if (!skinViewer) {
+            skinViewer = new skinview3d.SkinViewer({
+              canvas: skinCanvas,
+              width: 300,
+              height: 400
+            });
+            skinViewer.animation = new skinview3d.WalkingAnimation();
+            skinViewer.autoRotate = true;
+            skinViewer.autoRotateSpeed = 0.5;
+          }
+          
+          // Load skin from our own server (avoids CORS)
+          const skinUrl = `/skins/${encodeURIComponent(name)}.png`;
+          skinViewer.loadSkin(skinUrl)
+            .then(() => {})
+            .catch(err => console.warn('[SkinViewer] Skin load failed, using default:', err));
+          skinViewer.animation.paused = false;
+        } catch (err) {
+          console.error('[SkinViewer] FATAL:', err);
+          skinCanvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-muted);font-size:var(--text-sm);">3D viewer unavailable</div>';
         }
-        
-        // Load skin
-        const uuid = meta.uuid || name;
-        skinViewer.loadSkin(`https://crafatar.com/skins/${uuid}`);
-        skinViewer.animation.paused = false;
       }
 
       window.addEventListener('keydown', e => {
