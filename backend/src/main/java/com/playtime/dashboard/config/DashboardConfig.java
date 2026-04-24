@@ -16,7 +16,7 @@ public class DashboardConfig {
     public int web_port = 5000;
     public int incremental_update_interval_minutes = 5;
     public String logs_directory = ""; // Leave empty to use default (game_dir/logs)
-    public List<String> ignored_players = Arrays.asList("ironfarmbot", "mobfarmbot");
+    public List<String> ignored_players = Arrays.asList("ironfarmbot", "mobfarmbot", "EinenSoenenAbend");
     public boolean fetch_player_heads = true;      // Fetch Minecraft player heads from Mojang
     public int skin_refresh_hours = 24;            // Hours before re-fetching a player's skin
 
