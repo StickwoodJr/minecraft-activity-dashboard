@@ -129,7 +129,7 @@ public class DashboardWebServer {
                 headService.fetchAllKnown(playerNames);
             }
         } catch (Exception e) {
-            FabricDashboardMod.warn("Could not scan cache for player names: " + e.getMessage());
+            FabricDashboardMod.LOGGER.warn("Could not scan cache for player names: " + e.getMessage());
         }
     }
 
@@ -391,19 +391,30 @@ public class DashboardWebServer {
                 List<String> ignored = DashboardConfig.get().ignored_players;
 
                 if (ignored != null && !ignored.isEmpty()) {
+                    Set<String> ignoreSet = new HashSet<>();
+                    for (String s : ignored) ignoreSet.add(s.toLowerCase());
+
                     // Filter sessData
                     if (data.has("sessData")) {
                         JsonObject sess = data.getAsJsonObject("sessData");
-                        for (String p : ignored) sess.remove(p);
+                        List<String> toRemove = new ArrayList<>();
+                        for (String p : sess.keySet()) {
+                            if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
+                        }
+                        for (String p : toRemove) sess.remove(p);
                     }
 
-                    // Filter playerDailyRaw and hourly, and collect for daily recalculation
+                    // Filter playerDailyRaw and collect for daily recalculation
                     Map<String, Double> newDaily = new HashMap<>();
                     if (data.has("playerDailyRaw")) {
                         JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
                         for (String date : pdr.keySet()) {
                             JsonObject dayMap = pdr.getAsJsonObject(date);
-                            for (String p : ignored) dayMap.remove(p);
+                            List<String> toRemove = new ArrayList<>();
+                            for (String p : dayMap.keySet()) {
+                                if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
+                            }
+                            for (String p : toRemove) dayMap.remove(p);
                             
                             double sumMinutes = 0;
                             for (String p : dayMap.keySet()) {
@@ -413,16 +424,23 @@ public class DashboardWebServer {
                         }
                     }
 
+                    // Filter hourly
                     if (data.has("hourly")) {
                         JsonObject hly = data.getAsJsonObject("hourly");
                         for (String date : hly.keySet()) {
                             JsonObject dayMap = hly.getAsJsonObject(date);
-                            for (String p : ignored) dayMap.remove(p);
+                            List<String> toRemove = new ArrayList<>();
+                            for (String p : dayMap.keySet()) {
+                                if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
+                            }
+                            for (String p : toRemove) dayMap.remove(p);
                         }
                     }
 
                     // Overwrite daily totals with filtered ones
                     data.add("daily", GSON.toJsonTree(newDaily));
+                    // Include the ignored list in the response for the frontend to be extra sure
+                    data.add("ignored_players", GSON.toJsonTree(ignored));
                 }
 
                 byte[] json = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
