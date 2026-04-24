@@ -129,7 +129,7 @@ public class DashboardWebServer {
                 headService.fetchAllKnown(playerNames);
             }
         } catch (Exception e) {
-            FabricDashboardMod.LOGGER.warn("Could not scan cache for player names: " + e.getMessage());
+            FabricDashboardMod.warn("Could not scan cache for player names: " + e.getMessage());
         }
     }
 
@@ -362,6 +362,7 @@ public class DashboardWebServer {
 
     private static class ApiHandler implements HttpHandler {
         private final File cacheFile;
+        private static final Gson GSON = new Gson();
 
         public ApiHandler(File cacheFile) {
             this.cacheFile = cacheFile;
@@ -384,15 +385,54 @@ public class DashboardWebServer {
                 }
                 return;
             }
-            
-            exchange.sendResponseHeaders(200, cacheFile.length());
-            try (InputStream is = new FileInputStream(cacheFile);
-                 OutputStream os = exchange.getResponseBody()) {
-                byte[] buffer = new byte[8192];
-                int bytesRead;
-                while ((bytesRead = is.read(buffer)) != -1) {
-                    os.write(buffer, 0, bytesRead);
+
+            try (Reader reader = new FileReader(cacheFile)) {
+                JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
+                List<String> ignored = DashboardConfig.get().ignored_players;
+
+                if (ignored != null && !ignored.isEmpty()) {
+                    // Filter sessData
+                    if (data.has("sessData")) {
+                        JsonObject sess = data.getAsJsonObject("sessData");
+                        for (String p : ignored) sess.remove(p);
+                    }
+
+                    // Filter playerDailyRaw and hourly, and collect for daily recalculation
+                    Map<String, Double> newDaily = new HashMap<>();
+                    if (data.has("playerDailyRaw")) {
+                        JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
+                        for (String date : pdr.keySet()) {
+                            JsonObject dayMap = pdr.getAsJsonObject(date);
+                            for (String p : ignored) dayMap.remove(p);
+                            
+                            double sumMinutes = 0;
+                            for (String p : dayMap.keySet()) {
+                                sumMinutes += dayMap.get(p).getAsDouble();
+                            }
+                            newDaily.put(date, Math.round((sumMinutes / 60.0) * 100.0) / 100.0);
+                        }
+                    }
+
+                    if (data.has("hourly")) {
+                        JsonObject hly = data.getAsJsonObject("hourly");
+                        for (String date : hly.keySet()) {
+                            JsonObject dayMap = hly.getAsJsonObject(date);
+                            for (String p : ignored) dayMap.remove(p);
+                        }
+                    }
+
+                    // Overwrite daily totals with filtered ones
+                    data.add("daily", GSON.toJsonTree(newDaily));
                 }
+
+                byte[] json = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, json.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(json);
+                }
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.error("Failed to serve filtered API activity", e);
+                exchange.sendResponseHeaders(500, -1);
             }
         }
     }
