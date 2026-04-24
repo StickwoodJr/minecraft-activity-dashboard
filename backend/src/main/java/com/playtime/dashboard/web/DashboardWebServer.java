@@ -53,6 +53,7 @@ public class DashboardWebServer {
             httpServer.createContext("/api/activity", new ApiHandler(cacheFile));
             httpServer.createContext("/api/player-meta", new PlayerMetaHandler(headService));
             httpServer.createContext("/faces/", new FaceHandler(headService));
+            httpServer.createContext("/skins/", new SkinHandler(headService));
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
             httpServer.start();
@@ -244,6 +245,9 @@ public class DashboardWebServer {
             exchange.getResponseHeaders().set("Content-Type", "image/png");
             exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
 
+            // Always trigger a background fetch check (it will return quickly if fresh)
+            headService.fetchIfNeeded(playerName);
+
             if (faceFile != null && faceFile.exists()) {
                 exchange.sendResponseHeaders(200, faceFile.length());
                 try (InputStream is = new FileInputStream(faceFile);
@@ -257,8 +261,6 @@ public class DashboardWebServer {
             } else {
                 // Serve default head from pre-loaded bytes
                 serveDefaultHead(exchange);
-                // Trigger a background fetch for this player
-                headService.fetchIfNeeded(playerName);
             }
         }
 
@@ -273,6 +275,59 @@ public class DashboardWebServer {
             exchange.sendResponseHeaders(200, defaultBytes.length);
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(defaultBytes);
+            }
+        }
+    }
+
+    /** Serves cached full skin PNGs for the 3D viewer. Same-origin avoids CORS. */
+    private static class SkinHandler implements HttpHandler {
+        private final PlayerHeadService headService;
+
+        public SkinHandler(PlayerHeadService headService) {
+            this.headService = headService;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            String filename = path.substring("/skins/".length());
+            if (!filename.endsWith(".png")) {
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+            String playerName = filename.substring(0, filename.length() - 4);
+
+            if (!playerName.matches("[\\w/\\-]+")) {
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
+
+            File skinFile = headService.getFullSkinFile(playerName);
+
+            exchange.getResponseHeaders().set("Content-Type", "image/png");
+            exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
+
+            // Always trigger a background fetch check
+            headService.fetchIfNeeded(playerName);
+
+            if (skinFile != null && skinFile.exists()) {
+                exchange.sendResponseHeaders(200, skinFile.length());
+                try (InputStream is = new FileInputStream(skinFile);
+                     OutputStream os = exchange.getResponseBody()) {
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        os.write(buffer, 0, bytesRead);
+                    }
+                }
+            } else {
+                // No cached full skin — return 404; frontend will show default model
+                exchange.sendResponseHeaders(404, -1);
             }
         }
     }

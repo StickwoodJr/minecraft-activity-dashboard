@@ -6,6 +6,7 @@
     <title>MC Server — Player Activity Heatmap</title>
     <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/skinview3d@3.0.0/bundles/skinview3d.bundle.js"></script>
     <style>
       :root,[data-theme="light"]{
         --color-bg:#f7f6f2;--color-surface:#f9f8f5;--color-surface-2:#fbfbf9;
@@ -190,6 +191,58 @@
       .rank-2{background:oklch(0.82 0.04 240);color:oklch(0.4 0.06 240);}
       .rank-3{background:oklch(0.80 0.08 50);color:oklch(0.45 0.09 50);}
 
+      /* Player Detail Modal */
+      .modal-overlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 1000; opacity: 0; pointer-events: none;
+        transition: opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .modal-overlay.visible { opacity: 1; pointer-events: auto; }
+      .modal-content {
+        background: var(--color-surface);
+        border: 1px solid oklch(from var(--color-text) l c h / 0.1);
+        border-radius: var(--radius-xl);
+        width: 90%; max-width: 840px; height: auto; max-height: 90dvh;
+        overflow-y: auto; position: relative;
+        transform: translateY(20px) scale(0.98);
+        transition: transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+        box-shadow: var(--shadow-lg);
+        display: grid; grid-template-columns: 320px 1fr;
+      }
+      @media (max-width: 768px) {
+        .modal-content { grid-template-columns: 1fr; }
+      }
+      .modal-overlay.visible .modal-content { transform: translateY(0) scale(1); }
+      .modal-close {
+        position: absolute; top: var(--space-4); right: var(--space-4);
+        width: 32px; height: 32px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--color-surface-dynamic); border: 1px solid var(--color-border);
+        color: var(--color-text); cursor: pointer; z-index: 10;
+      }
+      .modal-viewer-side {
+        background: oklch(from var(--color-primary) 0.15 0.04 h);
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: var(--space-8); position: relative;
+      }
+      #skinViewerWrap { width: 100%; aspect-ratio: 3/4; cursor: grab; position: relative; }
+      #skinViewerWrap:active { cursor: grabbing; }
+      #skinViewerCanvas { width: 100% !important; height: 100% !important; display: block; }
+      .modal-info-side { padding: var(--space-8); display: flex; flex-direction: column; gap: var(--space-6); }
+      .modal-player-header { display: flex; align-items: center; gap: var(--space-4); }
+      .modal-player-name { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.02em; }
+      .modal-stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
+      .stat-card {
+        background: var(--color-surface-2); border: 1px solid var(--color-divider);
+        padding: var(--space-4); border-radius: var(--radius-lg);
+        display: flex; flex-direction: column; gap: var(--space-1);
+      }
+      .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-text-faint); font-weight: 700; }
+      .stat-value { font-size: var(--text-base); font-weight: 700; color: var(--color-text); }
+      .stat-icon { color: var(--color-primary); margin-bottom: var(--space-1); }
+
       @media(max-width:768px){
         .heatmap-section.panel-open{grid-template-columns:1fr;}
         header{padding:var(--space-3) var(--space-4);}
@@ -302,6 +355,28 @@
           <tbody id="playerTableBody"></tbody>
         </table>
       </div>
+
+      <div class="modal-overlay" id="playerModal">
+        <div class="modal-content">
+          <button class="modal-close" onclick="closePlayerModal()">✕</button>
+          <div class="modal-viewer-side">
+            <div id="skinViewerWrap"><canvas id="skinViewerCanvas"></canvas></div>
+          </div>
+          <div class="modal-info-side">
+            <div class="modal-player-header">
+              <div id="modalPlayerHead"></div>
+              <div class="modal-player-name" id="modalPlayerName">PlayerName</div>
+            </div>
+            <div class="modal-stats-grid" id="modalStats">
+              <!-- Stats dynamic -->
+            </div>
+            <div style="margin-top:auto; font-size:var(--text-xs); color:var(--color-text-faint); display:flex; align-items:center; gap:var(--space-2);">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              Calculated from latest server logs
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
 
     <div class="tooltip" id="tooltip"></div>
@@ -334,7 +409,7 @@
       }
 
       // Dynamic player colors fetched from skin-derived data
-      let PLAYER_COLORS = {};
+      let PLAYER_META = {};
 
       // Returns an <img> tag for a player's Minecraft head
       function playerHead(name, size = 16) {
@@ -343,7 +418,7 @@
 
       // Returns a small color indicator (for contexts where images don't work, like chart.js)
       function playerColor(name) {
-        return PLAYER_COLORS[name] || '#888';
+        return (PLAYER_META[name] && PLAYER_META[name].colorHex) || '#888';
       }
 
       let playerTotals = {};
@@ -885,7 +960,7 @@
           const sd=sessData[p]||{};
           const avgMin=sd.avg||0;
           const avgFmt=avgMin<60?Math.round(avgMin)+'m':(avgMin/60).toFixed(1)+'h';
-          return `<tr>
+          return `<tr onclick="showPlayerDetails('${p}')" style="cursor:pointer;">
             <td style="display:flex;align-items:center;">
               <span style="display:inline-block;width:28px;text-align:left;flex-shrink:0;">${i<3?`<span class="rank-badge ${rankClass[i]||''}">${i+1}</span>`:''}</span>
               ${playerHead(p, 28)}
@@ -898,12 +973,117 @@
         }).join('');
       }
 
+      let skinViewer = null;
+
+      function closePlayerModal() {
+        document.getElementById('playerModal').classList.remove('visible');
+      }
+
+      function showPlayerDetails(name) {
+        const meta = PLAYER_META[name] || {};
+        const sd = sessData[name] || {};
+        
+        document.getElementById('modalPlayerName').textContent = name;
+        document.getElementById('modalPlayerHead').innerHTML = playerHead(name, 32);
+        
+        // Calculate stats
+        const totalMinutes = playerTotals[name] || 0;
+        
+        // Peak month
+        const monthly = {};
+        for (const [date, players] of Object.entries(playerDailyRaw)) {
+          if (players[name]) {
+            const m = date.substring(0, 7); // YYYY-MM
+            monthly[m] = (monthly[m] || 0) + players[name];
+          }
+        }
+        const peakMonth = Object.entries(monthly).sort((a,b) => b[1]-a[1])[0];
+        let peakMonthFmt = '-';
+        if (peakMonth) {
+          const [y, m] = peakMonth[0].split('-');
+          const mnames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          peakMonthFmt = mnames[parseInt(m)-1] + ' ' + y;
+        }
+
+        // Peak hour (convert from UTC server time to browser local time)
+        const hourlyAccUtc = new Array(24).fill(0);
+        for (const [date, players] of Object.entries(hourly)) {
+          if (players[name]) {
+            players[name].forEach((mins, h) => { hourlyAccUtc[h] += mins; });
+          }
+        }
+        // Shift UTC hours to local timezone
+        const tzOffsetHours = new Date().getTimezoneOffset() / 60;
+        const hourlyAcc = new Array(24).fill(0);
+        for (let h = 0; h < 24; h++) {
+          const localH = ((h - tzOffsetHours) % 24 + 24) % 24;
+          hourlyAcc[localH] = hourlyAccUtc[h];
+        }
+        const peakHourIdx = hourlyAcc.indexOf(Math.max(...hourlyAcc));
+        let peakHourFmt = '-';
+        if (Math.max(...hourlyAcc) > 0) {
+          const h = peakHourIdx % 12 || 12;
+          const ampm = peakHourIdx < 12 ? 'am' : 'pm';
+          peakHourFmt = h + ampm;
+        }
+
+        const stats = [
+          { label: 'Total Playtime', value: fmtHours(totalMinutes/60), icon: '⏱️' },
+          { label: 'Sessions', value: sd.sessions || '0', icon: '🎮' },
+          { label: 'Avg Session', value: sd.avg < 60 ? Math.round(sd.avg)+'m' : (sd.avg/60).toFixed(1)+'h', icon: '📊' },
+          { label: 'Longest Session', value: sd.longestSession ? (sd.longestSession < 60 ? Math.round(sd.longestSession)+'m' : (sd.longestSession/60).toFixed(1)+'h') : '-', icon: '🏆' },
+          { label: 'Peak Hour', value: peakHourFmt, icon: '🔥' },
+          { label: 'Most Active Month', value: peakMonthFmt, icon: '📅' }
+        ];
+
+        document.getElementById('modalStats').innerHTML = stats.map(s => `
+          <div class="stat-card">
+            <div class="stat-icon">${s.icon}</div>
+            <div class="stat-label">${s.label}</div>
+            <div class="stat-value">${s.value}</div>
+          </div>
+        `).join('');
+
+        // Show modal
+        const modal = document.getElementById('playerModal');
+        modal.classList.add('visible');
+
+        // Initialize/Update SkinViewer
+        const skinCanvas = document.getElementById('skinViewerCanvas');
+        try {
+          if (!skinViewer) {
+            skinViewer = new skinview3d.SkinViewer({
+              canvas: skinCanvas,
+              width: 300,
+              height: 400
+            });
+            skinViewer.animation = new skinview3d.WalkingAnimation();
+            skinViewer.autoRotate = true;
+            skinViewer.autoRotateSpeed = 0.5;
+          }
+          
+          // Load skin from our own server (avoids CORS)
+          const skinUrl = `/skins/${encodeURIComponent(name)}.png`;
+          skinViewer.loadSkin(skinUrl)
+            .then(() => {})
+            .catch(err => console.warn('[SkinViewer] Skin load failed, using default:', err));
+          skinViewer.animation.paused = false;
+        } catch (err) {
+          console.error('[SkinViewer] FATAL:', err);
+          skinCanvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-muted);font-size:var(--text-sm);">3D viewer unavailable</div>';
+        }
+      }
+
+      window.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closePlayerModal();
+      });
+
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
 
       async function loadPlayerMeta() {
         try {
           const res = await fetch('/api/player-meta');
-          PLAYER_COLORS = await res.json();
+          PLAYER_META = await res.json();
         } catch(e) {
           console.warn('Could not load player meta, using fallback colors');
         }
