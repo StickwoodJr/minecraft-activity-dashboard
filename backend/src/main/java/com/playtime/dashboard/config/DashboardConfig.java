@@ -24,9 +24,7 @@ public class DashboardConfig {
     private static DashboardConfig instance;
 
     public static DashboardConfig get() {
-        if (instance == null) {
-            load();
-        }
+        load();
         return instance;
     }
 
