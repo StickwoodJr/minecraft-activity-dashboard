@@ -262,6 +262,7 @@ public class LogParser {
         double totalMinutesCombined = sData.sessions * sData.avg;
         sData.sessions++;
         sData.avg = (totalMinutesCombined + sessionTotalMinutes) / sData.sessions;
+        sData.longestSession = Math.max(sData.longestSession, sessionTotalMinutes);
 
         // Distribute minutes to days/hours accurately
         LocalDateTime current = startTs;
@@ -307,6 +308,7 @@ public class LogParser {
         }
         for (DashboardData.SessionData sd : data.sessData.values()) {
             sd.avg = Math.round(sd.avg * 10.0) / 10.0;
+            sd.longestSession = Math.round(sd.longestSession * 10.0) / 10.0;
         }
         for (Map<String, double[]> map : data.hourly.values()) {
             for (double[] arr : map.values()) {

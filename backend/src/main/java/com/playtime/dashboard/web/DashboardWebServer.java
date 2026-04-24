@@ -293,8 +293,8 @@ public class DashboardWebServer {
                 return;
             }
 
-            Map<String, String> colorMap = headService.getColorMap();
-            byte[] json = GSON.toJson(colorMap).getBytes(StandardCharsets.UTF_8);
+            Map<String, PlayerHeadService.PlayerMeta> metaMap = headService.getColorMap();
+            byte[] json = GSON.toJson(metaMap).getBytes(StandardCharsets.UTF_8);
 
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
             exchange.getResponseHeaders().set("Cache-Control", "public, max-age=60");
