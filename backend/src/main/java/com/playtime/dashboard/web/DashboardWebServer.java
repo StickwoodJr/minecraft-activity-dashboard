@@ -190,6 +190,9 @@ public class DashboardWebServer {
                 }
                 
                 exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+                exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+                exchange.getResponseHeaders().set("Pragma", "no-cache");
+                exchange.getResponseHeaders().set("Expires", "0");
                 exchange.sendResponseHeaders(200, 0);
                 
                 try (OutputStream os = exchange.getResponseBody()) {
@@ -352,7 +355,9 @@ public class DashboardWebServer {
             byte[] json = GSON.toJson(metaMap).getBytes(StandardCharsets.UTF_8);
 
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.getResponseHeaders().set("Cache-Control", "public, max-age=60");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
             exchange.sendResponseHeaders(200, json.length);
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(json);
@@ -376,6 +381,9 @@ public class DashboardWebServer {
             }
             
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
             
             if (!cacheFile.exists()) {
                 String emptyJson = "{\"daily\":{},\"playerDailyRaw\":{},\"sessData\":{},\"hourly\":{}}";
