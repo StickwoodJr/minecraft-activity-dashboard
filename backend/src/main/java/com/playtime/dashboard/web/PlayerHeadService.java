@@ -150,13 +150,9 @@ public class PlayerHeadService {
         return defaultHeadBytes;
     }
 
-    /** Returns the full color map (playerName → hex color string). */
-    public Map<String, String> getColorMap() {
-        Map<String, String> result = new HashMap<>();
-        for (Map.Entry<String, PlayerMeta> entry : metaMap.entrySet()) {
-            result.put(entry.getKey(), entry.getValue().colorHex);
-        }
-        return result;
+    /** Returns the full color map (playerName → PlayerMeta). */
+    public Map<String, PlayerMeta> getColorMap() {
+        return new HashMap<>(metaMap);
     }
 
     /** Shutdown the background executor cleanly. */
