@@ -80,7 +80,8 @@ public class DashboardWebServer {
                     FabricDashboardMod.LOGGER.info("Found existing cache file at " + cacheFile.getAbsolutePath() + ". Skipping historical parse.");
                 }
 
-                // After parse, trigger head fetches for all known players
+                // Trigger head fetches once after the startup parse — not on every incremental update.
+                // New players discovered later will have their heads fetched on-demand by the FaceHandler.
                 triggerHeadFetches();
 
                 long delay = DashboardConfig.get().incremental_update_interval_minutes;
@@ -93,8 +94,6 @@ public class DashboardWebServer {
                         incLogsDir = new File(FabricLoader.getInstance().getGameDir().toFile(), "logs");
                     }
                     parser.runIncrementalParse(incLogsDir, cacheFile);
-                    // Re-check for new players after incremental parse
-                    triggerHeadFetches();
                 }, delay, delay, TimeUnit.MINUTES);
             });
 
