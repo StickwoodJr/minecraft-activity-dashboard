@@ -667,6 +667,8 @@
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
       const STAT_CONFIG = [
         { id: 'distance_traveled_km', name: 'Total Distance Traveled', label: 'Distance Traveled', suffix: ' km' },
+        { id: 'total_blocks_broken', name: 'Total Blocks Broken', label: 'Blocks Broken', suffix: '' },
+        { id: 'total_blocks_placed', name: 'Total Blocks Placed', label: 'Blocks Placed', suffix: '' },
         { id: 'player_kills', name: 'Players Killed', label: 'Players Killed', suffix: '' },
         { id: 'mob_kills', name: 'Mobs Killed', label: 'Mobs Killed', suffix: '' },
         { id: 'deaths', name: 'Total Deaths', label: 'Total Deaths', suffix: '' },
@@ -1304,8 +1306,16 @@
           if (!res.ok) { container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">No stats found.</div>'; return; }
           const data = await res.json(); if (!data.stats) { container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">No stats.</div>'; return; }
           let distCm = 0; let extracted = {};
+          let totalMined = 0;
+          let totalUsed = 0;
+          const ITEM_SUFFIXES = ['_sword', '_pickaxe', '_axe', '_shovel', '_hoe', '_helmet', '_chestplate', '_leggings', '_boots', '_bucket', '_potion', '_stew', '_soup', '_bottle', '_pearl', '_egg', '_rod', '_shears', '_bow', '_crossbow', '_trident', '_shield', '_flint_and_steel', '_spyglass', '_compass', '_clock'];
+          const ITEM_NAMES = ['minecraft:apple', 'minecraft:bread', 'minecraft:steak', 'minecraft:cooked_porkchop', 'minecraft:cooked_mutton', 'minecraft:cooked_chicken', 'minecraft:cooked_rabbit', 'minecraft:cooked_cod', 'minecraft:cooked_salmon', 'minecraft:cookie', 'minecraft:pumpkin_pie', 'minecraft:sweet_berries', 'minecraft:glow_berries', 'minecraft:melon_slice', 'minecraft:carrot', 'minecraft:potato', 'minecraft:baked_potato', 'minecraft:poisonous_potato', 'minecraft:dried_kelp', 'minecraft:honey_bottle', 'minecraft:totem_of_undying', 'minecraft:experience_bottle', 'minecraft:ender_pearl', 'minecraft:snowball', 'minecraft:egg', 'minecraft:firework_rocket', 'minecraft:firework_star', 'minecraft:lead', 'minecraft:name_tag', 'minecraft:bone_meal', 'minecraft:ender_eye', 'minecraft:ghast_tear'];
+          const isBlockPlacement = (s) => !ITEM_NAMES.includes(s) && !ITEM_SUFFIXES.some(sx => s.endsWith(sx));
+
           for (const [cat, stats] of Object.entries(data.stats)) {
             for (const [sN, sV] of Object.entries(stats)) {
+              if (cat === 'minecraft:mined') totalMined += sV;
+              if (cat === 'minecraft:used' && isBlockPlacement(sN)) totalUsed += sV;
               if (sN.endsWith('_one_cm')) distCm += sV;
               else if (sN === 'minecraft:damage_taken') extracted['damage_taken_hearts'] = Math.floor(sV / 10);
               else if (sN === 'minecraft:damage_dealt') extracted['damage_dealt_hearts'] = Math.floor(sV / 10);
@@ -1320,9 +1330,14 @@
               else if (sN === 'minecraft:ender_dragon') extracted['ender_dragon'] = sV;
             }
           }
+          if (totalMined > 0) extracted['total_blocks_broken'] = totalMined;
+          if (totalUsed > 0) extracted['total_blocks_placed'] = totalUsed;
           if (distCm > 0) extracted['distance_traveled_km'] = Math.floor(distCm / 100000);
-          let h = `<div class="modal-stats-grid">` + STAT_CONFIG.map(s => { const v = extracted[s.id]; return (v !== undefined && v > 0) ? `<div class="stat-card interactive" onclick="openLeaderboard('${s.id}')"><div class="stat-label">${s.label}</div><div class="stat-value">${v.toLocaleString()}${s.suffix}</div></div>` : ''; }).join('') + `</div>`;
-          container.innerHTML = Object.keys(extracted).length ? h : '<div style="text-align:center;color:var(--color-text-faint);">No relevant stats.</div>';
+          let h = `<div class="modal-stats-grid">` + STAT_CONFIG.map(s => { 
+            const v = extracted[s.id] || 0; 
+            return `<div class="stat-card interactive" onclick="openLeaderboard('${s.id}')"><div class="stat-label">${s.label}</div><div class="stat-value">${v.toLocaleString()}${s.suffix}</div></div>`; 
+          }).join('') + `</div>`;
+          container.innerHTML = h;
         } catch (e) { container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">Error.</div>'; }
       }
 

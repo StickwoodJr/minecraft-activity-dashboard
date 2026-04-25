@@ -12,12 +12,39 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public class StatsAggregator {
+    private static final Set<String> ITEM_SUFFIXES = new HashSet<>(Arrays.asList(
+        "_sword", "_pickaxe", "_axe", "_shovel", "_hoe", "_helmet", "_chestplate", "_leggings", "_boots",
+        "_bucket", "_potion", "_stew", "_soup", "_bottle", "_pearl", "_egg", "_rod", "_shears", "_bow",
+        "_crossbow", "_trident", "_shield", "_rod", "_flint_and_steel", "_spyglass", "_compass", "_clock"
+    ));
+    
+    private static final Set<String> ITEM_NAMES = new HashSet<>(Arrays.asList(
+        "minecraft:apple", "minecraft:bread", "minecraft:steak", "minecraft:cooked_porkchop", "minecraft:cooked_mutton",
+        "minecraft:cooked_chicken", "minecraft:cooked_rabbit", "minecraft:cooked_cod", "minecraft:cooked_salmon",
+        "minecraft:cookie", "minecraft:pumpkin_pie", "minecraft:sweet_berries", "minecraft:glow_berries",
+        "minecraft:melon_slice", "minecraft:carrot", "minecraft:potato", "minecraft:baked_potato", "minecraft:poisonous_potato",
+        "minecraft:dried_kelp", "minecraft:honey_bottle", "minecraft:totem_of_undying", "minecraft:experience_bottle",
+        "minecraft:ender_pearl", "minecraft:snowball", "minecraft:egg", "minecraft:firework_rocket", "minecraft:firework_star",
+        "minecraft:lead", "minecraft:name_tag", "minecraft:bone_meal", "minecraft:ender_eye", "minecraft:ghast_tear"
+    ));
+
+    private boolean isBlockPlacement(String statId) {
+        if (ITEM_NAMES.contains(statId)) return false;
+        for (String suffix : ITEM_SUFFIXES) {
+            if (statId.endsWith(suffix)) return false;
+        }
+        return true;
+    }
+
     public Map<String, Map<String, Map<String, Integer>>> buildLeaderboards(Path statsDir, UuidCache uuidCache) {
         // Map<Category, Map<Stat, Map<PlayerName, Value>>>
         Map<String, Map<String, Map<String, Integer>>> result = new LinkedHashMap<>();
@@ -81,6 +108,8 @@ public class StatsAggregator {
         long distanceCm = 0;
         int damageTaken = 0;
         int damageDealt = 0;
+        int totalMined = 0;
+        int totalUsed = 0;
 
         Map<String, Map<String, Integer>> filteredCategory = result.computeIfAbsent("general", k -> new LinkedHashMap<>());
 
@@ -94,6 +123,12 @@ public class StatsAggregator {
                     while (reader.hasNext()) {
                         String stat = reader.nextName();
                         int value = reader.nextInt();
+
+                        if ("minecraft:mined".equals(category)) {
+                            totalMined += value;
+                        } else if ("minecraft:used".equals(category) && isBlockPlacement(stat)) {
+                            totalUsed += value;
+                        }
 
                         if (stat.endsWith("_one_cm")) {
                             distanceCm += value;
@@ -141,6 +176,14 @@ public class StatsAggregator {
         if (damageDealt > 0) {
             filteredCategory.computeIfAbsent("damage_dealt_hearts", k -> new LinkedHashMap<>())
                     .merge(playerName, damageDealt / 10, Integer::sum);
+        }
+        if (totalMined > 0) {
+            filteredCategory.computeIfAbsent("total_blocks_broken", k -> new LinkedHashMap<>())
+                    .merge(playerName, totalMined, Integer::sum);
+        }
+        if (totalUsed > 0) {
+            filteredCategory.computeIfAbsent("total_blocks_placed", k -> new LinkedHashMap<>())
+                    .merge(playerName, totalUsed, Integer::sum);
         }
     }
 
