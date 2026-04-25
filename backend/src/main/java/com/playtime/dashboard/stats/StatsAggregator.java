@@ -13,6 +13,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -48,6 +49,7 @@ public class StatsAggregator {
     public Map<String, Map<String, Map<String, Integer>>> buildLeaderboards(Path statsDir, UuidCache uuidCache) {
         // Map<Category, Map<Stat, Map<PlayerName, Value>>>
         Map<String, Map<String, Map<String, Integer>>> result = new LinkedHashMap<>();
+        Map<String, String> playerToUuid = new HashMap<>();
 
         File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
         if (files == null) return result;
@@ -58,17 +60,15 @@ public class StatsAggregator {
             try {
                 uuid = UUID.fromString(uuidStr);
             } catch (IllegalArgumentException e) {
-                continue; // Not a valid UUID file name
+                continue;
             }
 
             String rawName = uuidCache.getUsername(uuid).orElse(uuidStr);
             String playerName = normalizePlayer(rawName, uuidStr);
+            
+            if (isUuidString(playerName)) continue;
 
-            // Skip players that couldn't be resolved to a name (even after Mojang API check)
-            // and are still just raw UUID strings, to prevent UI clutter.
-            if (isUuidString(playerName)) {
-                continue;
-            }
+            playerToUuid.putIfAbsent(playerName, uuidStr);
 
             try (JsonReader reader = new JsonReader(new FileReader(statFile))) {
                 parseStatsIntoMap(reader, playerName, result);
@@ -76,6 +76,10 @@ public class StatsAggregator {
                 FabricDashboardMod.LOGGER.warn("Skipping malformed stats file: " + statFile.getName());
             }
         }
+
+        // --- Post-process Playstyle Leaderboards ---
+        calculateAndInjectPlaystyleScores(result, playerToUuid, statsDir.getParent());
+
         return result;
     }
 
@@ -104,12 +108,14 @@ public class StatsAggregator {
     }
 
     private void parseStatsIntoMap(JsonReader reader, String playerName, Map<String, Map<String, Map<String, Integer>>> result) throws IOException {
-        reader.beginObject(); // start main object
+        reader.beginObject();
         long distanceCm = 0;
         int damageTaken = 0;
         int damageDealt = 0;
         int totalMined = 0;
         int totalUsed = 0;
+        int redstoneUsed = 0;
+        int mobKills = 0;
 
         Map<String, Map<String, Integer>> filteredCategory = result.computeIfAbsent("general", k -> new LinkedHashMap<>());
 
@@ -126,8 +132,9 @@ public class StatsAggregator {
 
                         if ("minecraft:mined".equals(category)) {
                             totalMined += value;
-                        } else if ("minecraft:used".equals(category) && isBlockPlacement(stat)) {
-                            totalUsed += value;
+                        } else if ("minecraft:used".equals(category)) {
+                            if (isBlockPlacement(stat)) totalUsed += value;
+                            if (isRedstone(stat)) redstoneUsed += value;
                         }
 
                         if (stat.endsWith("_one_cm")) {
@@ -136,8 +143,10 @@ public class StatsAggregator {
                             damageTaken += value;
                         } else if (stat.equals("minecraft:damage_dealt")) {
                             damageDealt += value;
+                        } else if (stat.equals("minecraft:mob_kills")) {
+                            mobKills += value;
+                            addGeneralStat(filteredCategory, playerName, "mob_kills", value);
                         } else if (stat.equals("minecraft:player_kills") || 
-                                   stat.equals("minecraft:mob_kills") || 
                                    stat.equals("minecraft:deaths") || 
                                    stat.equals("minecraft:sleep_in_bed") || 
                                    stat.equals("minecraft:talked_to_villager") || 
@@ -147,55 +156,170 @@ public class StatsAggregator {
                                    stat.equals("minecraft:ender_dragon") || 
                                    stat.contains("dragon_fish")) {
                             
-                            // normalize stat names a bit to make frontend easier
                             String key = stat.replace("minecraft:", "").replace("tide:", "");
-                            if (key.contains("dragon_fish")) {
-                                key = "dragon_fish";
-                            }
-                            Map<String, Integer> statMap = filteredCategory.computeIfAbsent(key, k -> new LinkedHashMap<>());
-                            statMap.merge(playerName, value, Integer::sum);
+                            if (key.contains("dragon_fish")) key = "dragon_fish";
+                            addGeneralStat(filteredCategory, playerName, key, value);
                         }
                     }
                     reader.endObject();
                 }
                 reader.endObject();
             } else {
-                reader.skipValue(); // e.g. DataVersion
+                reader.skipValue();
             }
         }
-        reader.endObject();
-
         if (distanceCm > 0) {
-            filteredCategory.computeIfAbsent("distance_traveled_km", k -> new LinkedHashMap<>())
-                    .merge(playerName, (int)(distanceCm / 100000L), Integer::sum);
-        }
-        if (damageTaken > 0) {
-            filteredCategory.computeIfAbsent("damage_taken_hearts", k -> new LinkedHashMap<>())
-                    .merge(playerName, damageTaken / 10, Integer::sum);
+            addGeneralStat(filteredCategory, playerName, "distance_traveled_raw_cm", (int)distanceCm);
+            addGeneralStat(filteredCategory, playerName, "distance_traveled_km", (int)(distanceCm / 100000L));
         }
         if (damageDealt > 0) {
-            filteredCategory.computeIfAbsent("damage_dealt_hearts", k -> new LinkedHashMap<>())
-                    .merge(playerName, damageDealt / 10, Integer::sum);
+            addGeneralStat(filteredCategory, playerName, "damage_dealt_hearts", damageDealt / 10);
         }
         if (totalMined > 0) {
-            filteredCategory.computeIfAbsent("total_blocks_broken", k -> new LinkedHashMap<>())
-                    .merge(playerName, totalMined, Integer::sum);
+            addGeneralStat(filteredCategory, playerName, "total_blocks_broken", totalMined);
         }
         if (totalUsed > 0) {
-            filteredCategory.computeIfAbsent("total_blocks_placed", k -> new LinkedHashMap<>())
-                    .merge(playerName, totalUsed, Integer::sum);
+            addGeneralStat(filteredCategory, playerName, "total_blocks_placed", totalUsed);
+        }
+        if (redstoneUsed > 0) {
+            addGeneralStat(filteredCategory, playerName, "redstone_used_raw", redstoneUsed);
+        }
+
+        reader.endObject();
+    }
+
+    private void calculateAndInjectPlaystyleScores(Map<String, Map<String, Map<String, Integer>>> result, Map<String, String> playerToUuid, Path worldDir) {
+        Map<String, Map<String, Integer>> general = result.get("general");
+        if (general == null) return;
+
+        Map<String, Integer> distRaw = general.get("distance_traveled_raw_cm");
+        Map<String, Integer> blocksPlaced = general.get("total_blocks_placed");
+        Map<String, Integer> blocksBroken = general.get("total_blocks_broken");
+        Map<String, Integer> mobKills = general.get("mob_kills");
+        Map<String, Integer> damageHearts = general.get("damage_dealt_hearts");
+        Map<String, Integer> redstoneRaw = general.get("redstone_used_raw");
+
+        Set<String> allPlayers = new HashSet<>();
+        if (distRaw != null) allPlayers.addAll(distRaw.keySet());
+        if (blocksPlaced != null) allPlayers.addAll(blocksPlaced.keySet());
+        if (blocksBroken != null) allPlayers.addAll(blocksBroken.keySet());
+        if (mobKills != null) allPlayers.addAll(mobKills.keySet());
+        if (damageHearts != null) allPlayers.addAll(damageHearts.keySet());
+        if (redstoneRaw != null) allPlayers.addAll(redstoneRaw.keySet());
+
+        for (String player : allPlayers) {
+            String uuid = playerToUuid.get(player);
+            File advFile = worldDir.resolve("advancements").resolve(uuid + ".json").toFile();
+            int[] advBonuses = getAdvancementBonus(advFile);
+
+            long distKm = (distRaw != null && distRaw.containsKey(player)) ? (distRaw.get(player) / 100000L) : 0L;
+            int placed = (blocksPlaced != null) ? blocksPlaced.getOrDefault(player, 0) : 0;
+            int broken = (blocksBroken != null) ? blocksBroken.getOrDefault(player, 0) : 0;
+            int kills = (mobKills != null) ? mobKills.getOrDefault(player, 0) : 0;
+            int hearts = (damageHearts != null) ? damageHearts.getOrDefault(player, 0) : 0;
+            int rsUsed = (redstoneRaw != null) ? redstoneRaw.getOrDefault(player, 0) : 0;
+
+            // Explorer (5000km cap)
+            double expBase = Math.min(100.0, (distKm / 5000.0) * 100.0);
+            int expFinal = (int) Math.min(100, Math.max(5, expBase + Math.min(30, advBonuses[0])));
+
+            // Builder (500,000 action cap)
+            double bldBase = Math.min(100.0, ((placed + broken / 4.0) / 500000.0) * 100.0);
+            int bldFinal = (int) Math.min(100, Math.max(5, bldBase + Math.min(30, advBonuses[1])));
+
+            // Fighter (150,000 combat cap)
+            double fgtBase = Math.min(100.0, ((kills + hearts / 10.0) / 150000.0) * 100.0);
+            int fgtFinal = (int) Math.min(100, Math.max(5, fgtBase + Math.min(30, advBonuses[2])));
+
+            // Redstoner (7,500 interaction cap)
+            double redBase = Math.min(100.0, (rsUsed / 7500.0) * 100.0);
+            int redFinal = (int) Math.min(100, Math.max(5, redBase + Math.min(30, advBonuses[3])));
+
+            addGeneralStat(general, player, "playstyle_explorer", expFinal);
+            addGeneralStat(general, player, "playstyle_builder", bldFinal);
+            addGeneralStat(general, player, "playstyle_fighter", fgtFinal);
+            addGeneralStat(general, player, "playstyle_redstoner", redFinal);
         }
     }
 
+    private int[] getAdvancementBonus(File advFile) {
+        int[] bonuses = new int[4];
+        if (advFile == null || !advFile.exists()) return bonuses;
+
+        try (JsonReader reader = new JsonReader(new FileReader(advFile))) {
+            reader.beginObject();
+            while (reader.hasNext()) {
+                String advId = reader.nextName().toLowerCase();
+                reader.beginObject();
+                boolean done = false;
+                while (reader.hasNext()) {
+                    String key = reader.nextName();
+                    if ("done".equals(key)) {
+                        done = reader.nextBoolean();
+                    } else {
+                        reader.skipValue();
+                    }
+                }
+                reader.endObject();
+
+                if (done) {
+                    if (containsAny(advId, "explore", "discover", "travel", "biome", "adventure")) bonuses[0] += 5;
+                    if (containsAny(advId, "build", "construct", "place", "craft")) bonuses[1] += 5;
+                    if (containsAny(advId, "kill", "slay", "monster", "combat", "boss")) bonuses[2] += 5;
+                    if (containsAny(advId, "redstone", "machine", "circuit", "automation")) bonuses[3] += 5;
+                }
+            }
+            reader.endObject();
+        } catch (Exception e) {
+            // malformed or empty advancement file
+        }
+        return bonuses;
+    }
+
+    private boolean containsAny(String str, String... keywords) {
+        for (String k : keywords) {
+            if (str.contains(k)) return true;
+        }
+        return false;
+    }
+
+    private void addGeneralStat(Map<String, Map<String, Integer>> filteredCategory, String playerName, String key, int value) {
+        Map<String, Integer> statMap = filteredCategory.computeIfAbsent(key, k -> new LinkedHashMap<>());
+        statMap.merge(playerName, value, Integer::sum);
+    }
+
+    private boolean isRedstone(String stat) {
+        String id = stat.replace("minecraft:", "");
+        for (String rs : REDSTONE_ITEMS) {
+            if (id.equals(rs) || id.contains(rs)) return true;
+        }
+        return false;
+    }
+
+    private static final String[] REDSTONE_ITEMS = {
+        "redstone", "repeater", "comparator", "observer", "piston", "sticky_piston", 
+        "redstone_torch", "lever", "daylight_detector", "target", "sculk_sensor", 
+        "dropper", "dispenser", "hopper", "trapped_chest", "tnt", "tnt_minecart", 
+        "redstone_lamp", "redstone_block", "tripwire_hook", "sculk_shrieker", "sculk_catalyst"
+    };
+
     public void streamPlayerStats(String username, UuidCache uuidCache, Path statsDir, OutputStream out) throws IOException {
+        streamFile(username, uuidCache, statsDir, out, "stats");
+    }
+
+    public void streamPlayerAdvancements(String username, UuidCache uuidCache, Path advancementsDir, OutputStream out) throws IOException {
+        streamFile(username, uuidCache, advancementsDir, out, "advancements");
+    }
+
+    private void streamFile(String username, UuidCache uuidCache, Path dir, OutputStream out, String type) throws IOException {
         Optional<UUID> uuid = uuidCache.getUuid(username);
         
         if (uuid.isEmpty()) {
             // First check if the username itself is just a raw UUID string
             try {
                 uuid = Optional.of(UUID.fromString(username));
-                if (!Files.exists(statsDir.resolve(uuid.get() + ".json"))) {
-                    uuid = Optional.empty(); // Not a valid stat file, fallback to alias search
+                if (!Files.exists(dir.resolve(uuid.get() + ".json"))) {
+                    uuid = Optional.empty(); // Not a valid file, fallback to alias search
                 }
             } catch (IllegalArgumentException e) {
                 // Not a UUID string, proceed with alias search
@@ -218,7 +342,7 @@ public class StatsAggregator {
                             } catch (IllegalArgumentException e) {
                                 uuid = uuidCache.getUuid(entry.getKey());
                             }
-                            if (uuid.isPresent() && Files.exists(statsDir.resolve(uuid.get() + ".json"))) {
+                            if (uuid.isPresent() && Files.exists(dir.resolve(uuid.get() + ".json"))) {
                                 break;
                             }
                         }
@@ -231,13 +355,13 @@ public class StatsAggregator {
             throw new FileNotFoundException("Unknown player: " + username);
         }
 
-        Path statFile = statsDir.resolve(uuid.get() + ".json");
-        if (!Files.exists(statFile)) {
-            throw new FileNotFoundException("No stats for: " + username);
+        Path file = dir.resolve(uuid.get() + ".json");
+        if (!Files.exists(file)) {
+            throw new FileNotFoundException("No " + type + " for: " + username);
         }
 
-        // Act as a pure pipe — never parse the JSON
-        try (InputStream in = Files.newInputStream(statFile)) {
+        // Act as a pure pipe
+        try (InputStream in = Files.newInputStream(file)) {
             byte[] buffer = new byte[8192];
             int read;
             while ((read = in.read(buffer)) != -1) {
