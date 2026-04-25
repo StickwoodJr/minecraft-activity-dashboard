@@ -58,7 +58,41 @@ public class UuidCache {
     }
 
     public Optional<UUID> getUuid(String username) {
-        return Optional.ofNullable(nameToUuid.get(username.toLowerCase()));
+        UUID uuid = nameToUuid.get(username.toLowerCase());
+        if (uuid != null) return Optional.of(uuid);
+
+        // Try Mojang API for Name -> UUID
+        FabricDashboardMod.LOGGER.info("UUID for '" + username + "' not found locally, trying Mojang API...");
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.mojang.com/users/profiles/minecraft/" + username))
+                    .GET()
+                    .timeout(Duration.ofSeconds(5))
+                    .build();
+            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                JsonObject json = com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject();
+                if (json.has("id")) {
+                    String id = json.get("id").getAsString();
+                    // Mojang returns undashed UUIDs
+                    if (id.length() == 32) {
+                        id = id.substring(0, 8) + "-" + id.substring(8, 12) + "-" + id.substring(12, 16) + "-" + id.substring(16, 20) + "-" + id.substring(20);
+                    }
+                    UUID resolvedUuid = UUID.fromString(id);
+                    FabricDashboardMod.LOGGER.info("Successfully resolved '" + username + "' to " + resolvedUuid + " via Mojang");
+                    // Add to our transient cache so we don't spam Mojang
+                    uuidToName.put(resolvedUuid, username);
+                    nameToUuid.put(username.toLowerCase(), resolvedUuid);
+                    return Optional.of(resolvedUuid);
+                }
+            } else {
+                FabricDashboardMod.LOGGER.warn("Mojang API returned status " + response.statusCode() + " for '" + username + "'");
+            }
+        } catch (Exception e) {
+            FabricDashboardMod.LOGGER.error("Mojang API lookup failed for '" + username + "': " + e.getMessage());
+        }
+
+        return Optional.empty();
     }
 
     public Optional<String> getUsername(UUID uuid) {
