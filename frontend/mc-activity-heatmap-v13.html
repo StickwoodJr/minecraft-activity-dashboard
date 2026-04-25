@@ -143,13 +143,13 @@
       }
       .day-panel.visible{
         opacity:1;transform:translateX(0) scale(1);
-        pointer-events:auto;height:100%;overflow:visible;
+        pointer-events:auto;height:calc(100% - 24px);overflow:visible;
         padding:var(--space-5);border-width:1px;box-sizing:border-box;
       }
       .day-panel.closing{
         opacity:0;transform:translateX(24px) scale(0.97);
         pointer-events:none;
-        height:100%;overflow:visible;padding:var(--space-5);border-width:1px;box-sizing:border-box;
+        height:calc(100% - 24px);overflow:visible;padding:var(--space-5);border-width:1px;box-sizing:border-box;
       }
       .day-panel-header{display:flex;justify-content:space-between;align-items:flex-start;}
       .day-panel-title{font-size:var(--text-sm);font-weight:600;}
@@ -419,7 +419,134 @@
         border-bottom-right-radius: var(--radius-md);
       }
 
+      /* Search Components */
+      .search-container {
+        position: relative;
+        width: 100%;
+        max-width: 320px;
+        margin-left: auto;
+      }
+      .search-input-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .search-icon {
+        position: absolute;
+        left: 12px;
+        color: var(--color-text-faint);
+        pointer-events: none;
+      }
+      .search-input {
+        width: 100%;
+        padding: 10px 40px 10px 36px;
+        background: var(--color-surface-dynamic);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        color: var(--color-text);
+        font-family: inherit;
+        font-size: 14px;
+        transition: all var(--transition);
+      }
+      .search-input:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        background: var(--color-surface-offset);
+        box-shadow: 0 0 0 2px var(--color-primary-highlight);
+      }
+      .search-shortcut {
+        position: absolute;
+        right: 12px;
+        padding: 2px 6px;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        font-size: 10px;
+        color: var(--color-text-faint);
+        font-weight: 700;
+        pointer-events: none;
+      }
+      .search-results {
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 0;
+        right: 0;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        z-index: 1100;
+        max-height: 300px;
+        overflow-y: auto;
+        display: none;
+        padding: 6px;
+      }
+      .search-results.visible { display: block; animation: slideDown 200ms ease; }
+      .search-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: all var(--transition);
+      }
+      .search-item:hover, .search-item.selected {
+        background: var(--color-surface-dynamic);
+      }
+      .search-item-name {
+        font-size: 14px;
+        font-weight: 600;
+        flex: 1;
+      }
+      .search-item-meta {
+        font-size: 11px;
+        color: var(--color-text-faint);
+      }
+
+      .calendar-search-wrap {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        margin-bottom: var(--space-4);
+        width: 100%;
+      }
+      .calendar-search-wrap {
+        position: relative;
+        flex: 1;
+        max-width: 240px;
+      }
+      .calendar-search-wrap .search-input {
+        padding-block: 6px;
+        font-size: 13px;
+        border-radius: var(--radius-md);
+      }
+      .calendar-search-wrap .search-icon {
+        left: 10px;
+      }
+      .clear-filter-btn {
+        background: var(--color-primary-highlight);
+        color: var(--color-primary);
+        border: none;
+        padding: 4px 10px;
+        border-radius: var(--radius-full);
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all var(--transition);
+        display: none;
+        flex-shrink: 0;
+      }
+      .clear-filter-btn.active {
+        display: block !important;
+      }
+      .clear-filter-btn:hover {
+        background: var(--color-primary);
+        color: #fff;
+      }
+
       @media(max-width:768px){
+
         .heatmap-section.panel-open{grid-template-columns:1fr;}
         header{padding:var(--space-3) var(--space-4);}
         main{padding:var(--space-6) var(--space-4);}
@@ -440,6 +567,14 @@
         <div>
           <h1 class="page-title">{{DASHBOARD_TITLE}}</h1>
         </div>
+        <div class="search-container" id="headerSearchContainer">
+          <div class="search-input-wrap">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="text" class="search-input" id="headerSearchInput" placeholder="Search players..." autocomplete="off">
+            <div class="search-shortcut">⌘K</div>
+          </div>
+          <div class="search-results" id="headerSearchResults"></div>
+        </div>
       </div>
     </header>
 
@@ -455,25 +590,38 @@
         <p class="page-sub" id="pageSub" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">{{DASHBOARD_DESCRIPTION}}</p>
         <div class="kpi-row" id="kpiRow"></div>
 
-        <div class="card" style="height:fit-content;">
-        <div class="heatmap-section" id="heatmapSection">
-          <div class="heatmap-left">
-            <div class="card-title" style="margin-bottom:var(--space-4);">
-              Daily Playtime Calendar <span class="card-subtitle">click a day to see player breakdown</span>
+        <div class="card" style="height:fit-content; padding: var(--space-5);">
+          <div style="margin-bottom: var(--space-5);">
+            <div class="card-title" style="margin-bottom: var(--space-3);">
+              Daily Playtime Calendar <span class="card-subtitle">click a day to see breakdown</span>
             </div>
-            <div class="heatmap-scroll">
-              <div class="heatmap-inner">
-                <div class="day-labels-row" id="dayLabels"></div>
-                <div class="heatmap-grid" id="heatmapGrid"></div>
+            <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4);">
+              <div style="position: relative; width: 240px;">
+                <div class="search-input-wrap">
+                  <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  <input type="text" class="search-input" id="calendarSearchInput" placeholder="Filter by player..." autocomplete="off">
+                </div>
+                <div class="search-results" id="calendarSearchResults"></div>
               </div>
-            </div>
-            <div class="legend-row">
-              <span class="legend-label">Less</span>
-              <div class="legend-cells" id="legendCells"></div>
-              <span class="legend-label">More</span>
+              <button id="clearFilterBtn" class="clear-filter-btn">Clear Filter</button>
             </div>
           </div>
-          <div class="day-panel" id="dayPanel">
+
+          <div class="heatmap-section" id="heatmapSection">
+            <div class="heatmap-left">
+              <div class="heatmap-scroll">
+                <div class="heatmap-inner">
+                  <div class="day-labels-row" id="dayLabels"></div>
+                  <div class="heatmap-grid" id="heatmapGrid"></div>
+                </div>
+              </div>
+              <div class="legend-row">
+                <span class="legend-label">Less</span>
+                <div class="legend-cells" id="legendCells"></div>
+                <span class="legend-label">More</span>
+              </div>
+            </div>
+          <div class="day-panel" id="dayPanel" style="margin-top: 24px;">
             <div class="day-panel-header">
               <div>
                 <div class="day-panel-title" id="panelTitle"></div>
@@ -725,6 +873,7 @@
       let skinViewer = null;
       let livePollTimer = null;
       let liveState = null;
+      let filterPlayer = null;
       const livePlayerElements = new Map(); // Map name -> DOM element
 
       const isUUID = (str) => {
@@ -855,18 +1004,22 @@
         `;
       }
 
-      function buildCalendar(){
+      function buildCalendar() {
+        console.log("[Debug] Building Calendar. filterPlayer:", filterPlayer);
         const grid = document.getElementById('heatmapGrid');
-        grid.innerHTML='';
+        if (!grid) { console.error("[Debug] heatmapGrid missing!"); return; }
+        grid.innerHTML = '';
         const dates = Object.keys(daily).sort();
         let start, end, today;
         if (dates.length > 0) {
           const firstDate = new Date(dates[0] + 'T12:00:00');
           const lastDate = new Date(dates[dates.length - 1] + 'T12:00:00');
-          start = new Date(firstDate);
+          // Start on the first day of the month of the first data point
+          start = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
+          // End on the last day of the month of the last data point
           end = new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 0);
-          today = lastDate;
-          const mnames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          today = new Date();
+          const mnames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           const desc = `Combined playtime from join/leave events &middot; ${mnames[firstDate.getMonth()]} ${firstDate.getDate()} &ndash; ${mnames[lastDate.getMonth()]} ${lastDate.getDate()}, ${lastDate.getFullYear()}`;
           document.getElementById('pageSub').innerHTML = desc;
           document.getElementById('pageSubLeaderboards').innerHTML = desc;
@@ -875,22 +1028,35 @@
           end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
           today = new Date();
         }
-        const maxHours = Object.keys(daily).length > 0 ? Math.max(...Object.values(daily)) : 0;
+
+        // Calculate max hours for color scaling
+        let maxHours = 0;
+        if (filterPlayer) {
+          for (let dateStr in playerDailyRaw) {
+            const h = (playerDailyRaw[dateStr][filterPlayer] || 0) / 60;
+            if (h > maxHours) maxHours = h;
+          }
+        } else {
+          maxHours = Object.keys(daily).length > 0 ? Math.max(...Object.values(daily)) : 0;
+        }
+
         const startSunday = new Date(start);
         startSunday.setDate(startSunday.getDate() - startSunday.getDay());
-        const weeks=[];
-        let current=new Date(startSunday);
-        while(current<=end || current.getDay()!==0){
-          const week=[];
-          for(let d=0;d<7;d++){week.push(new Date(current));current.setDate(current.getDate()+1);}
+        const weeks = [];
+        let current = new Date(startSunday);
+        while (current <= end || current.getDay() !== 0) {
+          const week = [];
+          for (let d = 0; d < 7; d++) { week.push(new Date(current)); current.setDate(current.getDate() + 1); }
           weeks.push(week);
-          if(current>end && current.getDay()===0) break;
+          if (current > end && current.getDay() === 0) break;
         }
+
         const dayLabelsEl = document.getElementById('dayLabels');
-        dayLabelsEl.innerHTML = '<div class="day-label-spacer"></div>' + ['S','M','T','W','T','F','S'].map(d => `<div class="day-label-item">${d}</div>`).join('');
-        const tooltip=document.getElementById('tooltip');
-        const mnames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        dayLabelsEl.innerHTML = '<div class="day-label-spacer"></div>' + ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => `<div class="day-label-item">${d}</div>`).join('');
+        const tooltip = document.getElementById('tooltip');
+        const mnames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         let lastMonth = -1;
+
         weeks.forEach(week => {
           const weekLbl = document.createElement('div');
           weekLbl.className = 'week-label';
@@ -900,27 +1066,39 @@
             weekLbl.textContent = mnames[lastMonth];
           }
           grid.appendChild(weekLbl);
+
           week.forEach(day => {
-            const cell = document.createElement('div');
-            cell.className = 'day-cell';
-            const dateStr = day.getFullYear()+'-'+(String(day.getMonth()+1).padStart(2,'0'))+'-'+(String(day.getDate()).padStart(2,'0'));
-            const hours = daily[dateStr] || 0;
+            const dateStr = day.toISOString().split('T')[0];
             const isFuture = day > today;
             const isOut = day < start || day > end;
-            if (isFuture || isOut) { cell.classList.add('future'); }
-            else {
+            const cell = document.createElement('div');
+            cell.className = 'day-cell';
+            if (isFuture || isOut) {
+              cell.classList.add('future');
+            } else {
+              const hours = filterPlayer ? ((playerDailyRaw[dateStr] && playerDailyRaw[dateStr][filterPlayer]) || 0) / 60 : (daily[dateStr] || 0);
               const lv = getLevel(hours, maxHours);
               if (lv > 0) cell.classList.add('lv' + lv);
               cell.setAttribute('data-date', dateStr);
               cell.addEventListener('mouseenter', e => {
                 const pData = playerDailyRaw[dateStr] || {};
-                const sorted = Object.entries(pData).sort((a,b) => b[1]-a[1]);
+                const sorted = Object.entries(pData).sort((a, b) => b[1] - a[1]);
                 const d = new Date(dateStr + 'T12:00:00');
-                const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-                tooltip.innerHTML = `
-                  <div class="tooltip-date">${dayName}, ${mnames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}</div>
-                  <div class="tooltip-total">${fmtHours(hours)} total playtime</div>
-                  ${sorted.map(([p,m]) => `<div class="tooltip-player"><span>${playerHead(p, 16)}<span style="color:var(--color-text-muted)">${p}</span></span><span style="font-weight:500">${fmtHours(m/60)}</span></div>`).join('')}`;
+                const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+
+                if (filterPlayer) {
+                  const pHours = (pData[filterPlayer] || 0) / 60;
+                  tooltip.innerHTML = `
+                    <div class="tooltip-date">${dayName}, ${mnames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}</div>
+                    <div class="tooltip-total">${fmtHours(pHours)} playtime for ${filterPlayer}</div>
+                    <div class="tooltip-player"><span>${playerHead(filterPlayer, 16)}<span style="color:var(--color-text-muted)">${filterPlayer}</span></span><span style="font-weight:500">${fmtHours(pHours)}</span></div>
+                  `;
+                } else {
+                  tooltip.innerHTML = `
+                    <div class="tooltip-date">${dayName}, ${mnames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}</div>
+                    <div class="tooltip-total">${fmtHours(hours)} total playtime</div>
+                    ${sorted.map(([p, m]) => `<div class="tooltip-player"><span>${playerHead(p, 16)}<span style="color:var(--color-text-muted)">${p}</span></span><span style="font-weight:500">${fmtHours(m / 60)}</span></div>`).join('')}`;
+                }
                 tooltip.classList.add('visible');
                 positionTooltip(e);
               });
@@ -931,26 +1109,38 @@
                 if (selectedCell === cell) { closePanel(); return; }
                 if (selectedCell) selectedCell.classList.remove('selected');
                 selectedCell = cell; cell.classList.add('selected'); selectedDateStr = dateStr;
-                const hasData = (daily[dateStr] || 0) > 0;
-                if (!hasData) {
-                  // Clear any stale charts/breakdowns
-                  if(pieChartInstance){ pieChartInstance.destroy(); pieChartInstance=null; }
-                  if(hourlyChartInstance){ hourlyChartInstance.destroy(); hourlyChartInstance=null; }
-                  const bd = document.getElementById('hourBreakdown');
-                  if (bd) bd.innerHTML = '';
 
-                  const d = new Date(dateStr+'T12:00:00');
-                  const mnames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                  document.getElementById('panelTitle').textContent = `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]}, ${mnames[d.getMonth()]} ${d.getDate()}`;
-                  document.getElementById('panelSub').textContent = 'No activity recorded';
-                  
+                const d = new Date(dateStr + 'T12:00:00');
+                document.getElementById('panelTitle').textContent = `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]}, ${mnames[d.getMonth()]} ${d.getDate()}`;
+
+                const hasData = filterPlayer ? (playerDailyRaw[dateStr] && playerDailyRaw[dateStr][filterPlayer]) : (daily[dateStr] > 0);
+
+                if (!hasData) {
+                  document.getElementById('panelSub').textContent = filterPlayer ? `No activity for ${filterPlayer}` : 'No activity recorded';
                   document.getElementById('dayPanelContent').style.display = 'none';
                   document.getElementById('noDataMsg').style.display = 'block';
                 } else {
                   document.getElementById('noDataMsg').style.display = 'none';
                   document.getElementById('dayPanelContent').style.display = 'flex';
-                  
-                  if(currentViewMode === 'pie') {
+
+                  if (filterPlayer) {
+                    currentViewMode = 'hourly';
+                    document.getElementById('btnPie').parentElement.style.display = 'none';
+                  } else {
+                    document.getElementById('btnPie').parentElement.style.display = 'flex';
+                  }
+
+                  const hData = hourly[dateStr] || {};
+                  let tH = 0; let aP = 0;
+                  if (filterPlayer) {
+                    tH = (playerDailyRaw[dateStr][filterPlayer] || 0) / 60;
+                    aP = 1;
+                  } else {
+                    Object.values(hData).forEach(arr => { let sum = arr.reduce((a, b) => a + b, 0) / 60; if (sum > 0) aP++; tH += sum; });
+                  }
+                  document.getElementById('panelSub').textContent = `${fmtHours(tH)} total · ${aP} player${aP !== 1 ? 's' : ''}`;
+
+                  if (currentViewMode === 'pie') {
                     document.getElementById('pieViewContainer').style.display = 'flex';
                     document.getElementById('hourlyViewContainer').style.display = 'none';
                     document.getElementById('chartWrapPie').style.display = 'block';
@@ -958,19 +1148,6 @@
                   } else {
                     document.getElementById('pieViewContainer').style.display = 'none';
                     document.getElementById('hourlyViewContainer').style.display = 'flex';
-                    document.getElementById('chartWrapHourly').style.display = 'block';
-                    
-                    const bd = document.getElementById('hourBreakdown');
-                    if (bd) bd.innerHTML = '<div style="text-align:center; padding:var(--space-4); color:var(--color-text-muted); font-size:var(--text-sm);">Click a bar to see player breakdown</div>';
-
-                    const d = new Date(dateStr+'T12:00:00');
-                    const mnames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                    document.getElementById('panelTitle').textContent = `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]}, ${mnames[d.getMonth()]} ${d.getDate()}`;
-                    const hData = hourly[dateStr] || {};
-                    let tH = 0; let aP = 0;
-                    Object.values(hData).forEach(arr => { let sum = arr.reduce((a,b)=>a+b,0)/60; if(sum>0) aP++; tH += sum; });
-                    document.getElementById('panelSub').textContent = `${fmtHours(tH)} total · ${aP} player${aP>1?'s':''}`;
-                    console.log("[Debug] Heatmap click - building hourly for:", dateStr);
                     buildHourlyForDay(dateStr);
                   }
                 }
@@ -978,14 +1155,14 @@
                 const panel = document.getElementById('dayPanel');
                 panel.classList.remove('closing');
                 section.classList.add('panel-open');
-                if(isPanelFullscreen) section.classList.add('panel-fullscreen');
+                if (isPanelFullscreen) section.classList.add('panel-fullscreen');
                 requestAnimationFrame(() => panel.classList.add('visible'));
               });
             }
             grid.appendChild(cell);
           });
         });
-        document.getElementById('legendCells').innerHTML = ['cell-empty','cell-1','cell-2','cell-3','cell-4','cell-5'].map(c=>`<div class="legend-cell" style="background:var(--${c})"></div>`).join('');
+        document.getElementById('legendCells').innerHTML = ['cell-empty', 'cell-1', 'cell-2', 'cell-3', 'cell-4', 'cell-5'].map(c => `<div class="legend-cell" style="background:var(--${c})"></div>`).join('');
       }
 
       function buildPieForDay(dateStr, animate=true){
@@ -1065,7 +1242,12 @@
         }
         
         const hours = Array.from({length: 24}, (_, i) => { let h = i % 12 || 12; return `${h}${i < 12 ? 'am' : 'pm'}`; });
-        const datasets = Object.keys(localData).map(p => ({ label: p, data: localData[p].map(m => m / 60), backgroundColor: playerColor(p), borderWidth: 0 }));
+        let datasets = [];
+        if (filterPlayer) {
+          datasets = [{ label: filterPlayer, data: (localData[filterPlayer] || new Array(24).fill(0)).map(m => m / 60), backgroundColor: playerColor(filterPlayer), borderWidth: 0 }];
+        } else {
+          datasets = Object.keys(localData).map(p => ({ label: p, data: localData[p].map(m => m / 60), backgroundColor: playerColor(p), borderWidth: 0 }));
+        }
         hourlyLocalData = localData; hourlyLabelList = hours;
         if (bd) { bd.style.display = 'none'; bd.innerHTML = ''; }
         if(hourlyChartInstance){ 
@@ -1091,7 +1273,8 @@
       function showHourBreakdown(hourIndex) {
         const container = document.getElementById('hourBreakdown');
         const label = hourlyLabelList[hourIndex] || '';
-        const players = Object.entries(hourlyLocalData).map(([p, arr]) => ({ p, mins: arr[hourIndex] || 0 })).filter(x => x.mins > 0.5).sort((a, b) => b.mins - a.mins);
+        let players = Object.entries(hourlyLocalData).map(([p, arr]) => ({ p, mins: arr[hourIndex] || 0 })).filter(x => x.mins > 0.5).sort((a, b) => b.mins - a.mins);
+        if (filterPlayer) players = players.filter(x => x.p === filterPlayer);
         if (!players.length) { container.style.display = 'block'; container.innerHTML = '<div style="text-align:center; padding:var(--space-4); color:var(--color-text-muted); font-size:var(--text-sm);">No players active.</div>'; return; }
         container.style.display = 'block';
         container.innerHTML = `<div style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:var(--space-2);">${label} breakdown</div>` +
@@ -1442,6 +1625,160 @@
         } catch (e) { container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">Error.</div>'; }
       }
 
+      // --- Search Implementation ---
+
+      function initSearch() {
+        const headerInput = document.getElementById('headerSearchInput');
+        const headerResults = document.getElementById('headerSearchResults');
+        const calendarInput = document.getElementById('calendarSearchInput');
+        const calendarResults = document.getElementById('calendarSearchResults');
+        const clearBtn = document.getElementById('clearFilterBtn');
+
+        if (!headerInput || !headerResults || !calendarInput || !calendarResults || !clearBtn) {
+          console.warn("[Search] Search elements missing, skipping init.");
+          return;
+        }
+
+        const setupSearch = (input, results, onSelect) => {
+          let selectedIdx = -1;
+          let currentItems = [];
+
+          input.addEventListener('input', () => {
+            const query = input.value.trim().toLowerCase();
+            if (!query) {
+              results.classList.remove('visible');
+              return;
+            }
+
+            currentItems = ranked
+              .filter(([name]) => name.toLowerCase().includes(query))
+              .slice(0, 10);
+
+            if (currentItems.length === 0) {
+              results.innerHTML = `<div style="padding: 12px; text-align: center; color: var(--color-text-faint); font-size: 13px;">No players found</div>`;
+            } else {
+              results.innerHTML = currentItems.map(([name, mins], i) => `
+                <div class="search-item" data-index="${i}">
+                  ${playerHead(name, 24)}
+                  <div class="search-item-name">${name}</div>
+                  <div class="search-item-meta">${fmtHours(mins/60)} total</div>
+                </div>
+              `).join('');
+            }
+            results.classList.add('visible');
+            selectedIdx = -1;
+          });
+
+          input.addEventListener('keydown', (e) => {
+            const items = results.querySelectorAll('.search-item');
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              selectedIdx = (selectedIdx + 1) % items.length;
+              updateSelection(items);
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              selectedIdx = (selectedIdx - 1 + items.length) % items.length;
+              updateSelection(items);
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (selectedIdx >= 0) items[selectedIdx].click();
+              else if (currentItems.length > 0) onSelect(currentItems[0][0]);
+            } else if (e.key === 'Escape') {
+              results.classList.remove('visible');
+              input.blur();
+            }
+          });
+
+          const updateSelection = (items) => {
+            items.forEach((item, i) => {
+              if (i === selectedIdx) {
+                item.classList.add('selected');
+                item.scrollIntoView({ block: 'nearest' });
+              } else item.classList.remove('selected');
+            });
+          };
+
+          results.addEventListener('click', (e) => {
+            const item = e.target.closest('.search-item');
+            if (item) {
+              const idx = parseInt(item.dataset.index);
+              onSelect(currentItems[idx][0]);
+              results.classList.remove('visible');
+            }
+          });
+
+          // Close on blur with small delay for clicks
+          input.addEventListener('blur', () => setTimeout(() => results.classList.remove('visible'), 200));
+        };
+
+        setupSearch(headerInput, headerResults, (name) => {
+          headerInput.value = '';
+          showPlayerDetails(name);
+        });
+
+        setupSearch(calendarInput, calendarResults, (name) => {
+          calendarInput.value = name;
+          setCalendarFilter(name);
+        });
+
+        // Shortcuts
+        window.addEventListener('keydown', (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+            e.preventDefault();
+            headerInput.focus();
+          }
+        });
+
+        clearBtn.onclick = clearCalendarFilter;
+      }
+
+      function setCalendarFilter(name) {
+        console.log("[Debug] Setting calendar filter for:", name);
+        filterPlayer = name;
+        const btn = document.getElementById('clearFilterBtn');
+        if (btn) {
+          btn.classList.add('active');
+          console.log("[Debug] Clear button should now be visible");
+        } else {
+          console.error("[Debug] Clear button NOT FOUND in DOM");
+        }
+        
+        // Force hourly view for single player
+        currentViewMode = 'hourly';
+        document.getElementById('btnHourly').style.background = 'var(--color-primary)';
+        document.getElementById('btnHourly').style.color = '#fff';
+        document.getElementById('btnPie').style.background = 'var(--color-surface-offset)';
+        document.getElementById('btnPie').style.color = 'var(--color-text)';
+
+        buildCalendar();
+        if (selectedDateStr) {
+          const cell = document.querySelector(`.day-cell[data-date="${selectedDateStr}"]`);
+          if (cell) cell.click();
+        }
+      }
+
+      function clearCalendarFilter() {
+        console.log("[Debug] Clearing calendar filter");
+        filterPlayer = null;
+        document.getElementById('calendarSearchInput').value = '';
+        const btn = document.getElementById('clearFilterBtn');
+        if (btn) btn.classList.remove('active');
+        document.getElementById('btnPie').parentElement.style.display = 'flex';
+        
+        // Reset to pie view
+        currentViewMode = 'pie';
+        document.getElementById('btnPie').style.background = 'var(--color-primary)';
+        document.getElementById('btnPie').style.color = '#fff';
+        document.getElementById('btnHourly').style.background = 'var(--color-surface-offset)';
+        document.getElementById('btnHourly').style.color = 'var(--color-text)';
+
+        buildCalendar();
+        if (selectedDateStr) {
+          const cell = document.querySelector(`.day-cell[data-date="${selectedDateStr}"]`);
+          if (cell) cell.click();
+        }
+      }
+
       // --- Initialization ---
 
       async function loadActivity() {
@@ -1537,6 +1874,7 @@
           });
           ranked = Object.entries(playerTotals).sort((a,b)=>b[1]-a[1]);
           buildKPIs(); buildCalendar(); buildPlayerTable();
+          initSearch();
 
           console.log("[Playtime] Load complete.");
           hideOverlay();
