@@ -84,6 +84,17 @@
       .card-title{font-size:var(--text-base);font-weight:600;margin-bottom:var(--space-5);}
       .card-subtitle{font-size:var(--text-xs);color:var(--color-text-muted);font-weight:400;margin-left:var(--space-2);}
 
+      .stat-card.interactive {
+        transition: all var(--transition);
+        cursor: pointer;
+      }
+      .stat-card.interactive:hover {
+        background: var(--color-surface-dynamic);
+        border-color: var(--color-primary);
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-md);
+      }
+
       /* Heatmap + pie layout */
       .heatmap-section{display:grid;grid-template-columns:1fr;gap:var(--space-6);transition:grid-template-columns 320ms cubic-bezier(0.16,1,0.3,1);align-items:stretch;}
       .heatmap-section.panel-open{grid-template-columns:1fr 1fr;}
@@ -355,7 +366,7 @@
       }
       .modal-player-header { display: flex; align-items: center; gap: var(--space-4); }
       .modal-player-name { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.02em; }
-      .modal-stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); width: 100%; }
+      .modal-stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); width: 100%; padding-top: 8px; }
       .stat-card {
         background: var(--color-surface-2); border: 1px solid var(--color-divider);
         padding: var(--space-4); border-radius: var(--radius-lg);
@@ -1033,6 +1044,13 @@
 
       function closePlayerModal() { document.getElementById('playerModal').classList.remove('visible'); }
 
+      function openLeaderboard(statId) {
+        closePlayerModal();
+        const lbTab = document.getElementById('tabLeaderboards');
+        if (lbTab) lbTab.click();
+        selectStat(statId);
+      }
+
       function showPlayerDetails(name) {
         const sd = sessData[name] || {};
         document.getElementById('modalPlayerName').textContent = name;
@@ -1107,7 +1125,7 @@
             }
           }
           if (distCm > 0) extracted['distance_traveled_km'] = Math.floor(distCm / 100000);
-          let h = `<div class="modal-stats-grid">` + STAT_CONFIG.map(s => { const v = extracted[s.id]; return (v !== undefined && v > 0) ? `<div class="stat-card"><div class="stat-label">${s.label}</div><div class="stat-value">${v.toLocaleString()}${s.suffix}</div></div>` : ''; }).join('') + `</div>`;
+          let h = `<div class="modal-stats-grid">` + STAT_CONFIG.map(s => { const v = extracted[s.id]; return (v !== undefined && v > 0) ? `<div class="stat-card interactive" onclick="openLeaderboard('${s.id}')"><div class="stat-label">${s.label}</div><div class="stat-value">${v.toLocaleString()}${s.suffix}</div></div>` : ''; }).join('') + `</div>`;
           container.innerHTML = Object.keys(extracted).length ? h : '<div style="text-align:center;color:var(--color-text-faint);">No relevant stats.</div>';
         } catch (e) { container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">Error.</div>'; }
       }
