@@ -1,7 +1,7 @@
 # Minecraft Activity Dashboard
 
 ## Overview
-This project provides a comprehensive activity dashboard for Minecraft servers. Built as a Java Fabric mod, it tracks player join and leave events, aggregates in-game statistics, and serves a beautiful, interactive GitHub-style heatmap dashboard directly from the Minecraft server—no external web servers or databases required.
+This project provides a comprehensive activity dashboard for Minecraft servers. Built as a Java Fabric mod, it tracks player join and leave events, aggregates in-game statistics, and provides real-time performance monitoring via an interactive dashboard served directly from the server—no external web servers or databases required.
 
 ## How It Works
 The mod features an embedded lightweight HTTP server that runs quietly in the background of your Minecraft server. It automatically parses your server's log files (including compressed `.log.gz` archives) to calculate player session times and caches this data in a JSON file. When you visit the dashboard, the embedded server delivers a modern HTML/JS interface alongside the cached data, ensuring virtually zero impact on server performance.
@@ -29,6 +29,12 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Embedded World Map**: View your live [Dynmap](https://www.curseforge.com/minecraft/mc-mods/dynmap) directly inside the dashboard.
 *   **State-Preserving Tabs**: Switch between playtime stats and the live map without losing your zoom level or position.
 *   **Togglable**: Easily enable or disable the map tab via configuration.
+
+### ⚡ Live Server Performance
+*   **Real-Time Metrics**: Monitor Server TPS, MSPT (Tick Times), CPU usage, and JVM Memory directly from the dashboard.
+*   **Container Optimized**: Specialized support for Pterodactyl/Docker environments, reporting actual folder size (`/home/container`) rather than misleading host partition data.
+*   **Live Player List**: See who is online right now. Click any online player to jump straight to their full activity history.
+*   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
 
 ## Getting Started
 
@@ -68,6 +74,8 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. |
 | `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. |
 | `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. |
+| `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. |
+| `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. |
 
 ## Performance & Privacy
 - **Zero Database**: No SQL setup required; uses an optimized JSON flat-file cache.
