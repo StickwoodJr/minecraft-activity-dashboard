@@ -3,6 +3,8 @@ package com.playtime.dashboard.web;
 import com.playtime.dashboard.FabricDashboardMod;
 import com.playtime.dashboard.config.DashboardConfig;
 import com.playtime.dashboard.parser.LogParser;
+import com.playtime.dashboard.stats.StatsAggregator;
+import com.playtime.dashboard.util.UuidCache;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -36,12 +38,18 @@ public class DashboardWebServer {
     private final LogParser parser;
     private final File cacheFile;
     private final PlayerHeadService headService;
+    private final File leaderboardCacheFile;
+    private final StatsAggregator statsAggregator;
+    private final UuidCache uuidCache;
 
     public DashboardWebServer(MinecraftServer server) {
         this.minecraftServer = server;
         this.parser = new LogParser();
         this.cacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_cache.json");
         this.headService = new PlayerHeadService(FabricLoader.getInstance().getGameDir().toFile());
+        this.leaderboardCacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_leaderboards.json");
+        this.statsAggregator = new StatsAggregator();
+        this.uuidCache = new UuidCache();
     }
 
     public void start() {
@@ -54,13 +62,15 @@ public class DashboardWebServer {
             httpServer.createContext("/api/player-meta", new PlayerMetaHandler(headService));
             httpServer.createContext("/faces/", new FaceHandler(headService));
             httpServer.createContext("/skins/", new SkinHandler(headService));
+            httpServer.createContext("/api/leaderboards", new LeaderboardHandler(leaderboardCacheFile));
+            httpServer.createContext("/api/player-stats/", new PlayerStatsHandler(statsAggregator, uuidCache));
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
             httpServer.start();
             FabricDashboardMod.LOGGER.info("Dashboard Web Server started on port " + port);
 
             // Setup scheduling
-            scheduler = Executors.newScheduledThreadPool(1);
+            scheduler = Executors.newScheduledThreadPool(2);
             
             // Run historical parse once if needed, then schedule incremental
             scheduler.execute(() -> {
@@ -84,6 +94,25 @@ public class DashboardWebServer {
                 // Trigger head fetches once after the startup parse — not on every incremental update.
                 // New players discovered later will have their heads fetched on-demand by the FaceHandler.
                 triggerHeadFetches();
+
+                long lbDelay = DashboardConfig.get().leaderboard_update_interval_minutes;
+                scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        java.nio.file.Path statsDir = FabricLoader.getInstance().getGameDir()
+                            .resolve(DashboardConfig.get().stats_world_name)
+                            .resolve("stats");
+                        uuidCache.refresh(); // Re-read usercache.json
+                        Map<String, Map<String, Map<String, Integer>>> leaderboards = statsAggregator.buildLeaderboards(statsDir, uuidCache);
+                        
+                        File tempFile = new File(leaderboardCacheFile.getParentFile(), leaderboardCacheFile.getName() + ".tmp");
+                        try (java.io.FileWriter writer = new java.io.FileWriter(tempFile)) {
+                            new com.google.gson.Gson().toJson(leaderboards, writer);
+                        }
+                        java.nio.file.Files.move(tempFile.toPath(), leaderboardCacheFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                    } catch (Exception e) {
+                        FabricDashboardMod.LOGGER.error("Leaderboard aggregation failed", e);
+                    }
+                }, 0, lbDelay, TimeUnit.MINUTES);
 
                 long delay = DashboardConfig.get().incremental_update_interval_minutes;
                 scheduler.scheduleAtFixedRate(() -> {
@@ -156,12 +185,34 @@ public class DashboardWebServer {
             String path = exchange.getRequestURI().getPath();
             
             if (path.equals("/server-logo.jpg")) {
-                try (InputStream is = getClass().getResourceAsStream("/web/server-logo.jpg")) {
-                    if (is == null) {
-                        exchange.sendResponseHeaders(404, -1);
-                        return;
+                String customPath = DashboardConfig.get().custom_logo_path;
+                InputStream is = null;
+                File customFile = null;
+
+                if (customPath != null && !customPath.trim().isEmpty()) {
+                    customFile = new File(customPath);
+                    if (customFile.exists() && customFile.isFile()) {
+                        try {
+                            is = new FileInputStream(customFile);
+                        } catch (FileNotFoundException ignored) {}
                     }
-                    exchange.getResponseHeaders().set("Content-Type", "image/jpeg");
+                }
+
+                if (is == null) {
+                    is = getClass().getResourceAsStream("/web/server-logo.jpg");
+                }
+
+                if (is == null) {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+
+                try {
+                    String contentType = "image/jpeg";
+                    if (customFile != null && customFile.getName().toLowerCase().endsWith(".png")) {
+                        contentType = "image/png";
+                    }
+                    exchange.getResponseHeaders().set("Content-Type", contentType);
                     exchange.sendResponseHeaders(200, 0);
                     try (OutputStream os = exchange.getResponseBody()) {
                         byte[] buffer = new byte[8192];
@@ -170,10 +221,64 @@ public class DashboardWebServer {
                             os.write(buffer, 0, bytesRead);
                         }
                     }
+                } finally {
+                    is.close();
                 }
                 return;
             }
             
+            if (path.equals("/favicon.png") || path.equals("/favicon.ico")) {
+                DashboardConfig config = DashboardConfig.get();
+                String favPath = config.favicon_path;
+                String logoPath = config.custom_logo_path;
+                InputStream is = null;
+                File targetFile = null;
+
+                // 1. Try favicon_path
+                if (favPath != null && !favPath.trim().isEmpty()) {
+                    targetFile = new File(favPath);
+                    if (targetFile.exists() && targetFile.isFile()) {
+                        try { is = new FileInputStream(targetFile); } catch (FileNotFoundException ignored) {}
+                    }
+                }
+                // 2. Fallback to custom_logo_path
+                if (is == null && logoPath != null && !logoPath.trim().isEmpty()) {
+                    targetFile = new File(logoPath);
+                    if (targetFile.exists() && targetFile.isFile()) {
+                        try { is = new FileInputStream(targetFile); } catch (FileNotFoundException ignored) {}
+                    }
+                }
+                // 3. Fallback to default logo in JAR
+                if (is == null) {
+                    is = getClass().getResourceAsStream("/web/server-logo.jpg");
+                }
+
+                if (is == null) {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+
+                try {
+                    String contentType = "image/png"; // Default
+                    String name = (targetFile != null) ? targetFile.getName().toLowerCase() : "server-logo.jpg";
+                    if (name.endsWith(".jpg") || name.endsWith(".jpeg")) contentType = "image/jpeg";
+                    else if (name.endsWith(".ico")) contentType = "image/x-icon";
+                    
+                    exchange.getResponseHeaders().set("Content-Type", contentType);
+                    exchange.sendResponseHeaders(200, 0);
+                    try (OutputStream os = exchange.getResponseBody()) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            os.write(buffer, 0, bytesRead);
+                        }
+                    }
+                } finally {
+                    is.close();
+                }
+                return;
+            }
+
             if (!path.equals("/") && !path.equals("/mc-activity-heatmap-v13.html")) {
                 exchange.sendResponseHeaders(404, -1);
                 return;
@@ -189,18 +294,31 @@ public class DashboardWebServer {
                     return;
                 }
                 
+                // Read HTML and replace placeholders
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line).append("\n");
+                    }
+                }
+                
+                String html = sb.toString();
+                DashboardConfig config = DashboardConfig.get();
+                html = html.replace("{{TAB_TITLE}}", config.tab_title);
+                html = html.replace("{{SERVER_NAME}}", config.server_name);
+                html = html.replace("{{DASHBOARD_TITLE}}", config.dashboard_title);
+                html = html.replace("{{DASHBOARD_DESCRIPTION}}", config.dashboard_description);
+                
+                byte[] response = html.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
                 exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
                 exchange.getResponseHeaders().set("Pragma", "no-cache");
                 exchange.getResponseHeaders().set("Expires", "0");
-                exchange.sendResponseHeaders(200, 0);
+                exchange.sendResponseHeaders(200, response.length);
                 
                 try (OutputStream os = exchange.getResponseBody()) {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        os.write(buffer, 0, bytesRead);
-                    }
+                    os.write(response);
                 }
             }
         }
