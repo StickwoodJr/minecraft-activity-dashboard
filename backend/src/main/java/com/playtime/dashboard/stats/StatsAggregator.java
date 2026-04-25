@@ -53,26 +53,27 @@ public class StatsAggregator {
     }
 
     private boolean isUuidString(String str) {
-        if (str == null || str.length() != 36) return false;
-        try {
-            UUID.fromString(str);
-            return true;
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
+        if (str == null) return false;
+        String s = str.trim();
+        // Handle both dashed (36) and undashed (32) UUIDs
+        if (s.length() != 36 && s.length() != 32) return false;
+        // Match hex chars and optional dashes
+        return s.matches("^[0-9a-fA-F-]+$");
     }
 
     private String normalizePlayer(String name, String uuidStr) {
+        if (name == null) name = uuidStr;
+        String n = name.trim();
         Map<String, String> aliases = com.playtime.dashboard.config.DashboardConfig.get().player_aliases;
         if (aliases != null) {
-            if (aliases.containsKey(uuidStr)) return aliases.get(uuidStr);
-            if (aliases.containsKey(name)) return aliases.get(name);
-            if (aliases.containsKey(name.toLowerCase())) return aliases.get(name.toLowerCase());
+            if (aliases.containsKey(uuidStr)) return aliases.get(uuidStr).trim();
+            if (aliases.containsKey(n)) return aliases.get(n).trim();
+            if (aliases.containsKey(n.toLowerCase())) return aliases.get(n.toLowerCase()).trim();
         }
-        if (name.equalsIgnoreCase("hanger") || name.equalsIgnoreCase("advent")) {
+        if (n.equalsIgnoreCase("hanger") || n.equalsIgnoreCase("advent")) {
             return "Advent/Hanger";
         }
-        return name;
+        return n;
     }
 
     private void parseStatsIntoMap(JsonReader reader, String playerName, Map<String, Map<String, Map<String, Integer>>> result) throws IOException {

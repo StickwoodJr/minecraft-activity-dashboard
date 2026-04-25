@@ -378,12 +378,26 @@
       .stat-icon { color: var(--color-primary); margin-bottom: var(--space-1); display: none; }
 
       .table-container{width:100%;overflow-x:auto;}
-      .table-container table{width:100%;border-collapse:collapse;font-size:var(--text-sm);}
+      .table-container table{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--text-sm);}
       .table-container th{text-align:left;padding:var(--space-3) var(--space-4);color:var(--color-text-muted);font-weight:600;
         border-bottom:1px solid var(--color-divider);text-transform:uppercase;letter-spacing:.05em;font-size:11px;}
       .table-container td{padding:var(--space-4);border-bottom:1px solid var(--color-divider);vertical-align:middle;transition:background-color var(--transition);}
       .table-container tr:last-child td{border-bottom:none;}
       .table-container tr:hover td{background-color:oklch(from var(--color-primary) l c h / 0.05);cursor:pointer;}
+      .table-container tr:hover td:first-child { border-top-left-radius: var(--radius-md); border-bottom-left-radius: var(--radius-md); }
+      .table-container tr:hover td:last-child { border-top-right-radius: var(--radius-md); border-bottom-right-radius: var(--radius-md); }
+
+      .sorted-column { background-color: oklch(from var(--color-primary) l c h / 0.05) !important; }
+      .player-table th.sorted-column { 
+        border-bottom: 2px solid var(--color-primary) !important; 
+        color: var(--color-primary) !important; 
+        border-top-left-radius: var(--radius-md); 
+        border-top-right-radius: var(--radius-md); 
+      }
+      .player-table tr:last-child td.sorted-column {
+        border-bottom-left-radius: var(--radius-md);
+        border-bottom-right-radius: var(--radius-md);
+      }
 
       @media(max-width:768px){
         .heatmap-section.panel-open{grid-template-columns:1fr;}
@@ -477,17 +491,19 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Player Breakdown <span class="card-subtitle">total session time</span></div>
-        
-        <div class="custom-select" id="playerSortContainer" style="margin-bottom: var(--space-4); max-width: 280px;">
-          <div class="select-trigger" onclick="togglePlayerSortDropdown()">
-            <span id="selectedPlayerSortLabel">Sort by: Total Hours</span>
-            <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-          </div>
-          <div class="select-options" id="playerSortOptions">
-            <div class="select-option selected" onclick="selectPlayerSort('total')">Total Hours</div>
-            <div class="select-option" onclick="selectPlayerSort('sessions')">Sessions</div>
-            <div class="select-option" onclick="selectPlayerSort('avg')">Avg Session</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-5);">
+          <div class="card-title" style="margin-bottom:0;">Player Breakdown <span class="card-subtitle">total session time</span></div>
+          
+          <div class="custom-select" id="playerSortContainer" style="margin-bottom: 0; width: 180px;">
+            <div class="select-trigger" onclick="togglePlayerSortDropdown()">
+              <span id="selectedPlayerSortLabel">Sort</span>
+              <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+            <div class="select-options" id="playerSortOptions">
+              <div class="select-option selected" onclick="selectPlayerSort('total')">Total Hours</div>
+              <div class="select-option" onclick="selectPlayerSort('sessions')">Sessions</div>
+              <div class="select-option" onclick="selectPlayerSort('avg')">Avg Session</div>
+            </div>
           </div>
         </div>
 
@@ -496,9 +512,9 @@
             <thead>
               <tr>
                 <th style="width: 250px;">Player</th>
-                <th>Total Hours</th>
-                <th>Sessions</th>
-                <th>Avg Session</th>
+                <th id="th-total">Total Hours</th>
+                <th id="th-sessions">Sessions</th>
+                <th id="th-avg">Avg Session</th>
               </tr>
             </thead>
             <tbody id="playerTableBody"></tbody>
@@ -521,7 +537,7 @@
             </div>
             <div class="custom-select" id="orderSelectContainer" style="width: 200px; margin-bottom: 0;">
               <div class="select-trigger" onclick="toggleOrderDropdown()">
-                <span id="selectedOrderLabel">Sort: High → Low</span>
+                <span id="selectedOrderLabel">Sort</span>
                 <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
               </div>
               <div class="select-options" id="orderOptions">
@@ -536,7 +552,7 @@
                 <tr>
                   <th style="width: 80px;">Rank</th>
                   <th>Player</th>
-                  <th style="text-align: right;">Value</th>
+                  <th style="text-align: right;" id="lb-value-head">Value</th>
                 </tr>
               </thead>
               <tbody id="leaderboardBigBody">
@@ -619,6 +635,7 @@
       let playerTotals = {};
       let ranked = [];
       let leaderboardsData = null;
+      let ignoredPlayers = [];
       let selectedStatId = 'distance_traveled_km';
       let leaderboardSortOrder = 'desc';
       let playerSortMode = 'total';
@@ -631,6 +648,13 @@
       let hourlyLocalData = {};
       let hourlyLabelList = [];
       let skinViewer = null;
+
+      const isUUID = (str) => {
+        if (!str || typeof str !== 'string') return false;
+        const s = str.trim();
+        if (s.length !== 36 && s.length !== 32) return false;
+        return /^[0-9a-fA-F-]+$/i.test(s);
+      };
 
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
       const STAT_CONFIG = [
@@ -1002,8 +1026,7 @@
       function selectPlayerSort(mode) {
         playerSortMode = mode;
         document.getElementById('playerSortContainer').classList.remove('active');
-        const labels = { 'total': 'Total Hours', 'sessions': 'Sessions', 'avg': 'Avg Session' };
-        document.getElementById('selectedPlayerSortLabel').textContent = 'Sort by: ' + labels[mode];
+        document.getElementById('selectedPlayerSortLabel').textContent = 'Sort';
         
         // Update options styling
         const options = document.querySelectorAll('#playerSortOptions .select-option');
@@ -1012,6 +1035,12 @@
           else opt.classList.remove('selected');
         });
         
+        // Update header highlighting
+        document.querySelectorAll('.player-table th').forEach(th => th.classList.remove('sorted-column'));
+        const thMap = { 'total': 'th-total', 'sessions': 'th-sessions', 'avg': 'th-avg' };
+        const activeTh = document.getElementById(thMap[mode]);
+        if (activeTh) activeTh.classList.add('sorted-column');
+
         buildPlayerTable();
       }
 
@@ -1024,10 +1053,21 @@
           return b[1] - a[1]; // default 'total'
         });
 
+        // Update header highlighting if not already done (e.g. on initial load)
+        const thMap = { 'total': 'th-total', 'sessions': 'th-sessions', 'avg': 'th-avg' };
+        document.querySelectorAll('.player-table th').forEach(th => th.classList.remove('sorted-column'));
+        const activeTh = document.getElementById(thMap[playerSortMode]);
+        if (activeTh) activeTh.classList.add('sorted-column');
+
         document.getElementById('playerTableBody').innerHTML=sorted.map(([p,m],i)=>{
           const sd=sessData[p]||{};
           const avgMin=sd.avg||0;
-          return `<tr onclick="showPlayerDetails('${p}')"><td><div style="display:flex;align-items:center;"><span style="display:inline-block;width:28px;">${i<3?`<span class="rank-badge ${rankClass[i]}">${i+1}</span>`:''}</span>${playerHead(p, 28)}<span style="margin-left:var(--space-2);font-weight:600;">${p}</span></div></td><td>${(m/60).toFixed(1)}h</td><td>${sd.sessions||'-'}</td><td>${avgMin<60?Math.round(avgMin)+'m':(avgMin/60).toFixed(1)+'h'}</td></tr>`;
+          return `<tr onclick="showPlayerDetails('${p}')">
+            <td><div style="display:flex;align-items:center;"><span style="display:inline-block;width:28px;">${i<3?`<span class="rank-badge ${rankClass[i]}">${i+1}</span>`:''}</span>${playerHead(p, 28)}<span style="margin-left:var(--space-2);font-weight:600;">${p}</span></div></td>
+            <td class="${playerSortMode === 'total' ? 'sorted-column' : ''}">${(m/60).toFixed(1)}h</td>
+            <td class="${playerSortMode === 'sessions' ? 'sorted-column' : ''}">${sd.sessions||'-'}</td>
+            <td class="${playerSortMode === 'avg' ? 'sorted-column' : ''}">${avgMin<60?Math.round(avgMin)+'m':(avgMin/60).toFixed(1)+'h'}</td>
+          </tr>`;
         }).join('');
       }
 
@@ -1080,7 +1120,11 @@
         selectedStatId = id; 
         document.getElementById('statSelectContainer').classList.remove('active');
         renderStatOptions(); 
-        renderLeaderboards(); 
+
+        // Default to 'asc' for certain stats, otherwise 'desc'
+        const lowToHighStats = ['deaths', 'damage_taken_hearts', 'totem_of_undying'];
+        const newOrder = lowToHighStats.includes(id) ? 'asc' : 'desc';
+        selectOrder(newOrder);
       }
 
       function toggleOrderDropdown() {
@@ -1090,8 +1134,7 @@
       function selectOrder(order) {
         leaderboardSortOrder = order;
         document.getElementById('orderSelectContainer').classList.remove('active');
-        const label = order === 'desc' ? 'Sort: High → Low' : 'Sort: Low → High';
-        document.getElementById('selectedOrderLabel').textContent = label;
+        document.getElementById('selectedOrderLabel').textContent = 'Sort';
         
         // Update options styling
         const options = document.querySelectorAll('#orderOptions .select-option');
@@ -1107,10 +1150,36 @@
         const body = document.getElementById('leaderboardBigBody');
         if (!leaderboardsData || !leaderboardsData.general) { body.innerHTML = '<tr><td colspan="3" style="text-align:center;">No data.</td></tr>'; return; }
         const statConf = STAT_CONFIG.find(s => s.id === selectedStatId);
-        const players = leaderboardsData.general[selectedStatId] || {};
-        const sorted = Object.entries(players).sort((a,b) => {
-          return leaderboardSortOrder === 'desc' ? b[1] - a[1] : a[1] - b[1];
+        const playersWithStats = leaderboardsData.general[selectedStatId] || {};
+        
+        // Update header
+        const head = document.getElementById('lb-value-head');
+        if (head) head.textContent = statConf.label;
+
+        const normalize = (p) => {
+
+          const low = p.trim().toLowerCase();
+          if (low === 'hanger' || low === 'advent') return 'Advent/Hanger';
+          return p.trim();
+        };
+
+        // Include all known players (from metadata, playtime totals, and the stat itself)
+        const playerSet = new Set();
+        [...Object.keys(PLAYER_META), ...Object.keys(playerTotals), ...Object.keys(playersWithStats)].forEach(p => {
+          const n = normalize(p);
+          if (n && n.toLowerCase() !== 'hanger' && n.toLowerCase() !== 'advent') playerSet.add(n);
         });
+        
+        const sorted = Array.from(playerSet)
+          .filter(p => {
+            const low = p.toLowerCase();
+            return !ignoredPlayers.includes(low) && !isUUID(p);
+          })
+          .map(p => [p, playersWithStats[p] || 0])
+          .sort((a,b) => {
+            return leaderboardSortOrder === 'desc' ? b[1] - a[1] : a[1] - b[1];
+          });
+
         if (!sorted.length) { body.innerHTML = `<tr><td colspan="3" style="text-align:center;">No data for ${statConf.label}</td></tr>`; return; }
         body.innerHTML = sorted.map(([p, val], i) => `
           <tr onclick="showPlayerDetails('${p}')">
@@ -1230,17 +1299,70 @@
           
           console.log("[Playtime] Data received:", data);
           if (statusEl) statusEl.textContent = "Processing data...";
-          const ignored = (data.ignored_players || []).map(s => s.toLowerCase());
-          daily = data.daily || {}; playerDailyRaw = data.playerDailyRaw || {}; sessData = data.sessData || {}; hourly = data.hourly || {};
-          if (ignored.length) {
-            for (let d in playerDailyRaw) { for (let p in playerDailyRaw[d]) { if (ignored.includes(p.toLowerCase())) delete playerDailyRaw[d][p]; } }
-            for (let p in sessData) { if (ignored.includes(p.toLowerCase())) delete sessData[p]; }
-            for (let d in hourly) { for (let p in hourly[d]) { if (ignored.includes(p.toLowerCase())) delete hourly[d][p]; } }
-            for (let d in playerDailyRaw) { const sum = Object.values(playerDailyRaw[d]).reduce((a,b) => a+b, 0); daily[d] = Math.round((sum / 60) * 100) / 100; }
+          ignoredPlayers = (data.ignored_players || []).map(s => s.toLowerCase());
+          
+          const normalize = (p) => {
+            if (!p) return "";
+            const low = p.trim().toLowerCase();
+            if (low === 'hanger' || low === 'advent') return 'Advent/Hanger';
+            return p.trim();
+          };
+
+          // Deep clean the activity data
+          const cleanPlayerDaily = {};
+          for (let date in data.playerDailyRaw) {
+            cleanPlayerDaily[date] = {};
+            for (let p in data.playerDailyRaw[date]) {
+              const n = normalize(p);
+              if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+                cleanPlayerDaily[date][n] = (cleanPlayerDaily[date][n] || 0) + data.playerDailyRaw[date][p];
+              }
+            }
           }
-          playerTotals = {}; Object.values(playerDailyRaw).forEach(day => { Object.entries(day).forEach(([p,m]) => { playerTotals[p] = (playerTotals[p]||0)+m; }); });
+          playerDailyRaw = cleanPlayerDaily;
+
+          const cleanSessData = {};
+          for (let p in data.sessData) {
+            const n = normalize(p);
+            if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+              // Note: strictly speaking sessData should be merged if multiple names map to same alias,
+              // but for Advent/Hanger they likely share same log sessions anyway if mapped at log source.
+              if (!cleanSessData[n]) cleanSessData[n] = data.sessData[p];
+            }
+          }
+          sessData = cleanSessData;
+
+          const cleanHourly = {};
+          for (let date in data.hourly) {
+            cleanHourly[date] = {};
+            for (let p in data.hourly[date]) {
+              const n = normalize(p);
+              if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+                if (!cleanHourly[date][n]) cleanHourly[date][n] = new Array(24).fill(0);
+                const arr = data.hourly[date][p];
+                for(let i=0; i<24; i++) cleanHourly[date][n][i] += arr[i];
+              }
+            }
+          }
+          hourly = cleanHourly;
+
+          // Re-calculate daily totals based on cleaned player data
+          daily = {};
+          for (let date in playerDailyRaw) {
+            let sum = 0;
+            for (let p in playerDailyRaw[date]) sum += playerDailyRaw[date][p];
+            daily[date] = Math.round((sum / 60) * 100) / 100;
+          }
+
+          playerTotals = {}; 
+          Object.values(playerDailyRaw).forEach(day => { 
+            Object.entries(day).forEach(([p,m]) => { 
+              playerTotals[p] = (playerTotals[p]||0)+m; 
+            }); 
+          });
           ranked = Object.entries(playerTotals).sort((a,b)=>b[1]-a[1]);
           buildKPIs(); buildCalendar(); buildPlayerTable();
+
           console.log("[Playtime] Load complete.");
           hideOverlay();
         } catch (e) { 
