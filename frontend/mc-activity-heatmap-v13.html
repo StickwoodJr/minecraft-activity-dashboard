@@ -250,6 +250,26 @@
         border-color: var(--color-primary);
         box-shadow: 0 0 0 2px var(--color-primary-highlight);
       }
+      
+      .live-player-card {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        border-radius: var(--radius-lg);
+        background: var(--color-surface-dynamic);
+        border: 1px solid var(--color-border);
+        cursor: pointer;
+        transition: all var(--transition);
+        font-weight: 600;
+        font-size: var(--text-sm);
+      }
+      .live-player-card:hover {
+        background: var(--color-surface-offset);
+        border-color: var(--color-text-faint);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+      }
       .select-options {
         position: absolute;
         top: calc(100% + 8px);
@@ -427,6 +447,7 @@
       <div style="display:flex; gap:var(--space-4); border-bottom:1px solid var(--color-divider); margin-bottom:var(--space-2);">
         <button id="tabPlaytime" class="tab-btn active">Playtime</button>
         <button id="tabLeaderboards" class="tab-btn">Leaderboards</button>
+        <button id="tabLive" class="tab-btn" style="display:{{LIVE_TAB_DISPLAY}};">Live</button>
         <button id="tabDynmap" class="tab-btn" style="display:none;">Dynmap</button>
       </div>
 
@@ -525,6 +546,7 @@
       </div> <!-- end viewPlaytime -->
 
       <div id="viewLeaderboards" style="display:none; flex-direction:column; gap:var(--space-6);">
+        <p class="page-sub" id="pageSubLeaderboards" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">{{DASHBOARD_DESCRIPTION}}</p>
         <div class="card">
           <div style="display:flex; gap:var(--space-4); margin-bottom: var(--space-6);">
             <div class="custom-select" id="statSelectContainer" style="flex:1; margin-bottom: 0;">
@@ -560,6 +582,49 @@
                 <!-- Data dynamic -->
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+      
+      <div id="viewLive" style="display:none; flex-direction:column; gap:var(--space-6);">
+        <p class="page-sub" id="liveLastUpdate" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">Last update: never</p>
+        <div class="kpi-row" id="liveKpiRow">
+          <div class="kpi">
+            <div class="kpi-label">Players Online</div>
+            <div class="kpi-value" id="livePlayersValue">0 / 0</div>
+            <div class="kpi-note" id="livePlayersNote">Waiting for data...</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Server TPS</div>
+            <div class="kpi-value" id="liveTpsValue">0.0</div>
+            <div class="kpi-note" id="liveTpsNote">Target 20.0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Avg MSPT</div>
+            <div class="kpi-value" id="liveMsptValue">0.0 ms</div>
+            <div class="kpi-note" id="liveMsptNote">Target &lt; 50ms</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">CPU Usage</div>
+            <div class="kpi-value" id="liveCpuValue">0%</div>
+            <div class="kpi-note" id="liveCpuNote">Process Load</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Memory Usage</div>
+            <div class="kpi-value" id="liveMemValue">0 / 0 MB</div>
+            <div class="kpi-note" id="liveMemNote">JVM Heap</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Disk Space</div>
+            <div class="kpi-value" id="liveDiskValue">0 / 0 GB</div>
+            <div class="kpi-note" id="liveDiskNote">Used / Total</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Online Players</div>
+          <div id="livePlayerList" style="display:flex; flex-wrap:wrap; gap:var(--space-3);">
+            <div style="color:var(--color-text-faint); font-size:var(--text-sm);">No players currently online.</div>
           </div>
         </div>
       </div>
@@ -612,7 +677,9 @@
       console.log("[Playtime] Script starting...");
       const ENABLE_DYNMAP = "{{ENABLE_DYNMAP}}" === "true";
       const DYNMAP_URL = "{{DYNMAP_URL}}";
-      console.log("[Playtime] Dynmap Config:", { ENABLE_DYNMAP, DYNMAP_URL });
+      const ENABLE_LIVE_TAB = "{{ENABLE_LIVE_TAB}}" === "true";
+      const LIVE_UPDATE_INTERVAL = parseInt("{{LIVE_UPDATE_INTERVAL_MS}}") || 3000;
+      console.log("[Playtime] Config:", { ENABLE_DYNMAP, DYNMAP_URL, ENABLE_LIVE_TAB, LIVE_UPDATE_INTERVAL });
       const statusEl = document.getElementById('loadingStatus');
       const crashEl = document.getElementById('crashMessage');
       const overlayEl = document.getElementById('loadingOverlay');
@@ -656,6 +723,9 @@
       let hourlyLocalData = {};
       let hourlyLabelList = [];
       let skinViewer = null;
+      let livePollTimer = null;
+      let liveState = null;
+      const livePlayerElements = new Map(); // Map name -> DOM element
 
       const isUUID = (str) => {
         if (!str || typeof str !== 'string') return false;
@@ -797,7 +867,9 @@
           end = new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 0);
           today = lastDate;
           const mnames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          document.getElementById('pageSub').innerHTML = `Combined playtime from join/leave events &middot; ${mnames[firstDate.getMonth()]} ${firstDate.getDate()} &ndash; ${mnames[lastDate.getMonth()]} ${lastDate.getDate()}, ${lastDate.getFullYear()}`;
+          const desc = `Combined playtime from join/leave events &middot; ${mnames[firstDate.getMonth()]} ${firstDate.getDate()} &ndash; ${mnames[lastDate.getMonth()]} ${lastDate.getDate()}, ${lastDate.getFullYear()}`;
+          document.getElementById('pageSub').innerHTML = desc;
+          document.getElementById('pageSubLeaderboards').innerHTML = desc;
         } else {
           start = new Date(); start.setDate(1);
           end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
@@ -1227,18 +1299,47 @@
 
       function jumpToHeatmapDate(dateStr) {
         closePlayerModal();
+        
+        // 1. Reset viewport and switch tab
+        window.scrollTo({ top: 0, behavior: 'instant' });
         const pTab = document.getElementById('tabPlaytime');
         if (pTab) pTab.click();
         
         if (!dateStr) return;
         
+        // 2. Wait for tab to become visible
         setTimeout(() => {
           const cell = document.querySelector(`.day-cell[data-date="${dateStr}"]`);
-          if (cell) {
-            cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            setTimeout(() => cell.click(), 400);
+          const section = document.getElementById('heatmapSection');
+          
+          if (cell && section) {
+            // 3. Trigger the panel immediately so we can measure the expanded height
+            cell.click();
+            
+            // 4. Highlight the cell
+            cell.style.outline = "3px solid var(--color-primary)";
+            cell.style.outlineOffset = "4px";
+            cell.style.zIndex = "100";
+            
+            // 5. Short delay to let the panel start opening, then scroll
+            setTimeout(() => {
+              const rect = section.getBoundingClientRect();
+              const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+              
+              // Align the bottom of the section with the bottom of the window
+              const targetY = (rect.bottom + scrollTop) - window.innerHeight + 24; // +24px padding
+              
+              window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+              
+              // 6. Clean up highlight
+              setTimeout(() => {
+                cell.style.outline = "";
+                cell.style.outlineOffset = "";
+                cell.style.zIndex = "";
+              }, 2000);
+            }, 100);
           }
-        }, 100);
+        }, 400);
       }
 
       function showPlayerDetails(name) {
@@ -1453,26 +1554,158 @@
       }
 
       const updateTabs = (activeId) => {
-        const tabs = ['tabPlaytime', 'tabLeaderboards', 'tabDynmap'];
-        const views = ['viewPlaytime', 'viewLeaderboards', 'viewDynmap'];
+        const tabs = ['tabPlaytime', 'tabLeaderboards', 'tabLive', 'tabDynmap'];
+        const views = ['viewPlaytime', 'viewLeaderboards', 'viewLive', 'viewDynmap'];
         tabs.forEach((id, i) => {
           const btn = document.getElementById(id);
           const view = document.getElementById(views[i]);
+          if (!btn || !view) return;
           if (id === activeId) {
             btn.classList.add('active');
-            view.style.display = (id === 'viewDynmap' || id === 'tabDynmap') ? 'block' : 'flex';
+            view.style.display = (id === 'tabDynmap' || id === 'tabLive' || id === 'viewDynmap' || id === 'viewLive') ? 'flex' : 'flex'; 
+            // Correct display logic: use flex for all views except maybe dynmap if it prefers block
+            if (id === 'tabDynmap' || id === 'viewDynmap') view.style.display = 'block';
+            else view.style.display = 'flex';
           } else {
             btn.classList.remove('active');
             view.style.display = 'none';
           }
         });
+        
+        if (activeId === 'tabLive') {
+          startLivePolling();
+        } else {
+          stopLivePolling();
+        }
       };
+
+      async function fetchLiveMetrics() {
+        try {
+          const res = await fetch('/api/live');
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          liveState = data;
+          renderLive();
+        } catch (e) {
+          console.error("[Live] Polling failed:", e);
+          document.getElementById('liveLastUpdate').textContent = "Connection error: " + e.message;
+          document.getElementById('liveLastUpdate').style.color = "var(--color-primary)";
+        }
+      }
+
+      function startLivePolling() {
+        if (livePollTimer) return;
+        console.log("[Live] Starting polling...");
+        fetchLiveMetrics();
+        livePollTimer = setInterval(fetchLiveMetrics, LIVE_UPDATE_INTERVAL);
+      }
+
+      function stopLivePolling() {
+        if (!livePollTimer) return;
+        console.log("[Live] Stopping polling...");
+        clearInterval(livePollTimer);
+        livePollTimer = null;
+      }
+
+      function renderLive() {
+        if (!liveState) return;
+        
+        const data = liveState;
+        
+        // Players
+        document.getElementById('livePlayersValue').textContent = `${data.playersOnline} / ${data.maxPlayers}`;
+        document.getElementById('livePlayersNote').textContent = data.playersOnline > 0 ? "Active players" : "No players online";
+        
+        // TPS
+        const tps = data.tps.toFixed(1);
+        const tpsEl = document.getElementById('liveTpsValue');
+        tpsEl.textContent = tps;
+        if (data.tps >= 19) tpsEl.style.color = "#67c23a";
+        else if (data.tps >= 15) tpsEl.style.color = "#e6a23c";
+        else tpsEl.style.color = "#f56c6c";
+        
+        // MSPT
+        const msptEl = document.getElementById('liveMsptValue');
+        msptEl.textContent = `${data.mspt.toFixed(1)} ms`;
+        const msptNote = document.getElementById('liveMsptNote');
+        if (data.mspt < 35) { 
+          msptNote.textContent = "Great"; 
+          msptEl.style.color = "#67c23a";
+        } else if (data.mspt < 50) { 
+          msptNote.textContent = "Fair"; 
+          msptEl.style.color = "#e6a23c";
+        } else { 
+          msptNote.textContent = "Heavy Load"; 
+          msptEl.style.color = "#f56c6c";
+        }
+        
+        // CPU
+        const cpuEl = document.getElementById('liveCpuValue');
+        cpuEl.textContent = `${data.cpuProcess.toFixed(1)}%`;
+        if (data.cpuProcess < 60) cpuEl.style.color = "#67c23a";
+        else if (data.cpuProcess < 90) cpuEl.style.color = "#e6a23c";
+        else cpuEl.style.color = "#f56c6c";
+        document.getElementById('liveCpuNote').textContent = "Process Load";
+        
+        // Memory
+        const memEl = document.getElementById('liveMemValue');
+        memEl.textContent = `${data.jvmUsedMb} / ${data.jvmMaxMb} MB`;
+        const memPerc = (data.jvmUsedMb / data.jvmMaxMb) * 100;
+        if (memPerc < 70) memEl.style.color = "#67c23a";
+        else if (memPerc < 90) memEl.style.color = "#e6a23c";
+        else memEl.style.color = "#f56c6c";
+        
+        // Disk (Simplified to only show container size)
+        const worldGb = (data.worldSizeMb / 1024.0).toFixed(1);
+        document.getElementById('liveDiskValue').textContent = `${worldGb} GB`;
+        document.getElementById('liveDiskNote').textContent = "Folder Size";
+        
+        // Player List (Keyed Update to avoid DOM churn)
+        const listEl = document.getElementById('livePlayerList');
+        const newNames = data.playerNames || [];
+        
+        // Remove players who left
+        for (const [name, el] of livePlayerElements.entries()) {
+          if (!newNames.includes(name)) {
+            el.remove();
+            livePlayerElements.delete(name);
+          }
+        }
+        
+        // Add new players
+        newNames.forEach(name => {
+          if (!livePlayerElements.has(name)) {
+            if (livePlayerElements.size === 0 && listEl.children.length === 1 && listEl.children[0].textContent.includes("No players")) {
+              listEl.innerHTML = ""; // Clear placeholder
+            }
+            const div = document.createElement('div');
+            div.className = "live-player-card";
+            div.innerHTML = `
+              ${playerHead(name, 24)}
+              <span>${name}</span>
+            `;
+            div.onclick = () => showPlayerDetails(name);
+            listEl.appendChild(div);
+            livePlayerElements.set(name, div);
+          }
+        });
+
+        if (newNames.length === 0) {
+          listEl.innerHTML = `<div style="color:var(--color-text-faint); font-size:var(--text-sm);">No players currently online.</div>`;
+          livePlayerElements.clear();
+        }
+        
+        const lastUpd = document.getElementById('liveLastUpdate');
+        lastUpd.textContent = "Last update: " + new Date(data.timestamp).toLocaleTimeString();
+        lastUpd.style.color = "var(--color-text-muted)";
+      }
 
       document.getElementById('tabPlaytime').addEventListener('click', () => updateTabs('tabPlaytime'));
       document.getElementById('tabLeaderboards').addEventListener('click', () => { 
         updateTabs('tabLeaderboards'); 
         if (!leaderboardsData) loadLeaderboards(); 
       });
+      document.getElementById('tabLive').addEventListener('click', () => updateTabs('tabLive'));
       document.getElementById('tabDynmap').addEventListener('click', () => {
         console.log("[Playtime] Switching to Dynmap tab...");
         updateTabs('tabDynmap');
@@ -1486,6 +1719,7 @@
       if (ENABLE_DYNMAP) {
         document.getElementById('tabDynmap').style.display = 'block';
       }
+      // Note: tabLive display is handled by {{LIVE_TAB_DISPLAY}} placeholder in the style attribute
       document.getElementById('btnPie').addEventListener('click', () => { 
         currentViewMode = 'pie'; 
         document.getElementById('btnPie').style.background = 'var(--color-primary)'; 

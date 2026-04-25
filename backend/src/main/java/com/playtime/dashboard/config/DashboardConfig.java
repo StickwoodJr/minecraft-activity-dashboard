@@ -33,6 +33,8 @@ public class DashboardConfig {
     public int leaderboard_update_interval_minutes = 10; // Can differ from incremental_update_interval_minutes
     public boolean enable_dynmap = true;
     public String dynmap_url = "http://149.56.155.7:8032";
+    public boolean enable_live_tab = true;
+    public int live_update_interval_seconds = 3;
 
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static DashboardConfig instance;

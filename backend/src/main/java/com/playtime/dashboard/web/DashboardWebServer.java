@@ -10,6 +10,8 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import net.minecraft.server.MinecraftServer;
 import net.fabricmc.loader.api.FabricLoader;
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -34,13 +36,58 @@ import java.util.concurrent.TimeUnit;
 public class DashboardWebServer {
     private final MinecraftServer minecraftServer;
     private HttpServer httpServer;
-    private ScheduledExecutorService scheduler;
     private final LogParser parser;
     private final File cacheFile;
     private final PlayerHeadService headService;
     private final File leaderboardCacheFile;
     private final StatsAggregator statsAggregator;
     private final UuidCache uuidCache;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private volatile LiveMetricsSnapshot liveSnapshot;
+    private long cachedWorldSizeMb = 0;
+    private long lastWorldSizeCheck = 0;
+
+    public static class LiveMetricsSnapshot {
+        public final int playersOnline;
+        public final int maxPlayers;
+        public final List<String> playerNames;
+        public final double tps;
+        public final double mspt;
+        public final double cpuProcess;
+        public final long jvmUsedMb;
+        public final long jvmMaxMb;
+        public final double diskUsedGb;
+        public final double diskTotalGb;
+        public final double diskFreeGb;
+        public final long worldSizeMb;
+        public final String status;
+        public final long timestamp;
+
+        public LiveMetricsSnapshot(int playersOnline, int maxPlayers, List<String> playerNames, 
+                                   double tps, double mspt, double cpuProcess, 
+                                   long jvmUsedMb, long jvmMaxMb, double diskUsedGb, 
+                                   double diskTotalGb, double diskFreeGb, long worldSizeMb, String status) {
+            this.playersOnline = playersOnline;
+            this.maxPlayers = maxPlayers;
+            this.playerNames = Collections.unmodifiableList(playerNames);
+            this.tps = tps;
+            this.mspt = mspt;
+            this.cpuProcess = cpuProcess;
+            this.jvmUsedMb = jvmUsedMb;
+            this.jvmMaxMb = jvmMaxMb;
+            this.diskUsedGb = diskUsedGb;
+            this.diskTotalGb = diskTotalGb;
+            this.diskFreeGb = diskFreeGb;
+            this.worldSizeMb = worldSizeMb;
+            this.status = status;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        // Warming up constructor
+        public LiveMetricsSnapshot() {
+            this(0, 0, new ArrayList<>(), 0, 0, 0, 0, 0, 0, 0, 0, 0, "warming_up");
+        }
+    }
 
     public DashboardWebServer(MinecraftServer server) {
         this.minecraftServer = server;
@@ -64,13 +111,13 @@ public class DashboardWebServer {
             httpServer.createContext("/skins/", new SkinHandler(headService));
             httpServer.createContext("/api/leaderboards", new LeaderboardHandler(leaderboardCacheFile));
             httpServer.createContext("/api/player-stats/", new PlayerStatsHandler(statsAggregator, uuidCache));
+            httpServer.createContext("/api/live", new LiveMetricsHandler(this));
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
             httpServer.start();
             FabricDashboardMod.LOGGER.info("Dashboard Web Server started on port " + port);
 
             // Setup scheduling
-            scheduler = Executors.newScheduledThreadPool(2);
             
             // Run historical parse once if needed, then schedule incremental
             scheduler.execute(() -> {
@@ -125,11 +172,90 @@ public class DashboardWebServer {
                     }
                     parser.runIncrementalParse(incLogsDir, cacheFile);
                 }, delay, delay, TimeUnit.MINUTES);
+
+                // Live metrics sampling
+                if (DashboardConfig.get().enable_live_tab) {
+                    liveSnapshot = new LiveMetricsSnapshot();
+                    long liveInterval = DashboardConfig.get().live_update_interval_seconds;
+                    scheduler.scheduleAtFixedRate(this::updateLiveMetrics, 0, liveInterval, TimeUnit.SECONDS);
+                }
             });
 
         } catch (IOException e) {
             FabricDashboardMod.LOGGER.error("Failed to start Dashboard Web Server", e);
         }
+    }
+
+    private void updateLiveMetrics() {
+        try {
+            // Player data
+            int playersOnline = minecraftServer.getPlayerManager().getCurrentPlayerCount();
+            int maxPlayers = minecraftServer.getPlayerManager().getMaxPlayerCount();
+            List<String> playerNames = new ArrayList<>();
+            minecraftServer.getPlayerManager().getPlayerList().forEach(player -> {
+                if (playerNames.size() < 100) {
+                    playerNames.add(player.getGameProfile().getName());
+                }
+            });
+
+            // TPS / MSPT
+            double tps = 0;
+            double mspt = 0;
+            long[] tickTimes = minecraftServer.getTickTimes(); // Internal reference, used transiently
+            if (tickTimes != null && tickTimes.length > 0) {
+                long sum = 0;
+                for (long time : tickTimes) sum += time;
+                mspt = (sum / (double) tickTimes.length) * 1.0E-6D;
+                tps = Math.min(20.0D, 1000.0D / mspt);
+            }
+
+            // CPU / Memory
+            double cpuProcess = 0;
+            OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean) {
+                com.sun.management.OperatingSystemMXBean sunBean = (com.sun.management.OperatingSystemMXBean) osBean;
+                cpuProcess = sunBean.getProcessCpuLoad() * 100.0;
+            }
+            
+            Runtime runtime = Runtime.getRuntime();
+            long jvmMaxMb = runtime.maxMemory() / (1024 * 1024);
+            long jvmUsedMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024);
+
+            // Disk Usage
+            File targetDir = new File("/home/container");
+            if (!targetDir.exists()) {
+                targetDir = FabricLoader.getInstance().getGameDir().toFile();
+            }
+            
+            double diskTotalGb = targetDir.getTotalSpace() / (1024.0 * 1024.0 * 1024.0);
+            double diskFreeGb = targetDir.getUsableSpace() / (1024.0 * 1024.0 * 1024.0);
+            double diskUsedGb = diskTotalGb - diskFreeGb;
+
+            // World Size (Expensive, update every 10 minutes)
+            if (System.currentTimeMillis() - lastWorldSizeCheck > 600000) {
+                cachedWorldSizeMb = calculateDirectorySize(targetDir) / (1024 * 1024);
+                lastWorldSizeCheck = System.currentTimeMillis();
+            }
+
+            this.liveSnapshot = new LiveMetricsSnapshot(playersOnline, maxPlayers, playerNames, 
+                                                        tps, mspt, cpuProcess, 
+                                                        jvmUsedMb, jvmMaxMb, diskUsedGb, 
+                                                        diskTotalGb, diskFreeGb, cachedWorldSizeMb, "ok");
+        } catch (Exception e) {
+            FabricDashboardMod.LOGGER.error("Failed to update live metrics", e);
+        }
+    }
+
+    private long calculateDirectorySize(File directory) {
+        long length = 0;
+        File[] files = directory.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile()) length += file.length();
+                else length += calculateDirectorySize(file);
+            }
+        }
+        return length;
     }
 
     /** Scans the cache file for all known player names and kicks off head fetches. */
@@ -311,6 +437,9 @@ public class DashboardWebServer {
                 html = html.replace("{{DASHBOARD_DESCRIPTION}}", config.dashboard_description != null ? config.dashboard_description : "Session data");
                 html = html.replace("{{ENABLE_DYNMAP}}", String.valueOf(config.enable_dynmap));
                 html = html.replace("{{DYNMAP_URL}}", config.dynmap_url != null ? config.dynmap_url : "");
+                html = html.replace("{{ENABLE_LIVE_TAB}}", String.valueOf(config.enable_live_tab));
+                html = html.replace("{{LIVE_UPDATE_INTERVAL_MS}}", String.valueOf(config.live_update_interval_seconds * 1000));
+                html = html.replace("{{LIVE_TAB_DISPLAY}}", config.enable_live_tab ? "block" : "none");
                 
                 FabricDashboardMod.LOGGER.info("Serving dashboard. Dynmap enabled: " + config.enable_dynmap + ", URL: " + config.dynmap_url);
                 
@@ -581,6 +710,39 @@ public class DashboardWebServer {
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to serve filtered API activity", e);
                 exchange.sendResponseHeaders(500, -1);
+            }
+        }
+    }
+
+    private static class LiveMetricsHandler implements HttpHandler {
+        private final DashboardWebServer server;
+        private static final Gson GSON = new Gson();
+
+        public LiveMetricsHandler(DashboardWebServer server) {
+            this.server = server;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            LiveMetricsSnapshot snapshot = server.liveSnapshot;
+            if (snapshot == null) {
+                snapshot = new LiveMetricsSnapshot(); // warming_up state
+            }
+
+            byte[] response = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
+            exchange.sendResponseHeaders(200, response.length);
+            
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
             }
         }
     }
