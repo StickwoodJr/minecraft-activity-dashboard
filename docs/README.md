@@ -10,8 +10,14 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 
 ### 📅 Activity Heatmap
 *   **GitHub-Style Calendar**: Visualize server activity over months with intensity-coded tiles.
+*   **Player Filtering**: Search and filter the heatmap by player to see their specific activity patterns and busiest days.
 *   **Interactive Day Details**: Click any day to see a detailed player breakdown, including a pie chart of playtime distribution and an hourly activity graph.
 *   **Deep Linking**: Navigate directly from a player's profile to their busiest day in history.
+
+### 🔍 Global Player Search
+*   **Omni-Search**: Quickly find any player across the entire server history from the main header.
+*   **Shortcut Support**: Access the search bar instantly using `Ctrl+K` (or `Cmd+K` on Mac).
+*   **Instant Drill-Down**: Selecting a player from the search results opens their full profile modal with 3D skin and session analytics.
 
 ### 🏆 Global Leaderboards
 *   **Automatic Aggregation**: The mod scans Minecraft world stats to build leaderboards for:
