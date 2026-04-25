@@ -38,6 +38,7 @@ public class PlayerStatsHandler implements HttpHandler {
         }
 
         String username = path.substring(prefix.length());
+        FabricDashboardMod.LOGGER.info("PlayerStatsHandler: Request for '" + username + "'");
         
         if (!username.matches("[\\w/\\-]+")) {
             sendError(exchange, 400, "Invalid username format");
@@ -75,11 +76,13 @@ public class PlayerStatsHandler implements HttpHandler {
 
         try {
             statsAggregator.streamPlayerStats(username, uuidCache, baseStatsDir, lazyOut);
+            FabricDashboardMod.LOGGER.info("PlayerStatsHandler: Successfully served stats for '" + username + "'");
             lazyOut.close();
         } catch (FileNotFoundException e) {
+            FabricDashboardMod.LOGGER.warn("PlayerStatsHandler: Stats not found for '" + username + "': " + e.getMessage());
             sendError(exchange, 404, "Player not found");
         } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed to serve player stats", e);
+            FabricDashboardMod.LOGGER.error("PlayerStatsHandler: Error serving stats for '" + username + "'", e);
             sendError(exchange, 500, "Internal Server Error");
         }
     }
