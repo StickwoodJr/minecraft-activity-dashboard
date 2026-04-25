@@ -16,3 +16,4 @@ Minecraft server activity dashboard — Java Fabric mod backend with an embedded
 - Conventional commits: feat / fix / chore / docs / refactor
 - Feature branches for any change touching more than one file
 - No direct push to main for behavior changes; open a PR instead
+- **DO NOT** push to GitHub unless explicitly requested by the user

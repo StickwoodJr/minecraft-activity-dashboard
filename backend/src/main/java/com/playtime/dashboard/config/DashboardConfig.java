@@ -25,7 +25,7 @@ public class DashboardConfig {
     public String server_name = "MC Server";
     public String custom_logo_path = ""; // Path to a local .jpg or .png file
     public String favicon_path = "";    // Path to a local .ico, .png, or .jpg file
-    public List<String> ignored_players = Arrays.asList("ironfarmbot", "mobfarmbot", "EinenSoenenAbend");
+    public List<String> ignored_players = Arrays.asList("ironfarmbot", "mobfarmbot", "EinenSoenenAbend", "Hanger");
     public Map<String, String> player_aliases = new java.util.HashMap<>(); // Map UUIDs or Names to a single display name
     public boolean fetch_player_heads = true;      // Fetch Minecraft player heads from Mojang
     public int skin_refresh_hours = 24;            // Hours before re-fetching a player's skin
