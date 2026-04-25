@@ -419,7 +419,6 @@
         </div>
         <div>
           <h1 class="page-title">{{DASHBOARD_TITLE}}</h1>
-          <p class="page-sub" id="pageSub">{{DASHBOARD_DESCRIPTION}}</p>
         </div>
       </div>
     </header>
@@ -428,9 +427,11 @@
       <div style="display:flex; gap:var(--space-4); border-bottom:1px solid var(--color-divider); margin-bottom:var(--space-2);">
         <button id="tabPlaytime" class="tab-btn active">Playtime</button>
         <button id="tabLeaderboards" class="tab-btn">Leaderboards</button>
+        <button id="tabDynmap" class="tab-btn" style="display:none;">Dynmap</button>
       </div>
 
       <div id="viewPlaytime" style="display:flex;flex-direction:column;gap:var(--space-6);">
+        <p class="page-sub" id="pageSub" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">{{DASHBOARD_DESCRIPTION}}</p>
         <div class="kpi-row" id="kpiRow"></div>
 
         <div class="card" style="height:fit-content;">
@@ -563,6 +564,10 @@
         </div>
       </div>
 
+      <div id="viewDynmap" style="display:none; width:100%; height:85dvh; border-radius:var(--radius-xl); border:1px solid var(--color-border); background:var(--color-surface); overflow:hidden; box-shadow:var(--shadow-lg);">
+        <iframe id="dynmapFrame" src="" style="width:100%; height:100%; border:none;" allowfullscreen></iframe>
+      </div>
+
       <div class="modal-overlay" id="playerModal">
         <div class="modal-content">
           <button class="modal-close" onclick="closePlayerModal()">✕</button>
@@ -605,6 +610,9 @@
 
     <script>
       console.log("[Playtime] Script starting...");
+      const ENABLE_DYNMAP = "{{ENABLE_DYNMAP}}" === "true";
+      const DYNMAP_URL = "{{DYNMAP_URL}}";
+      console.log("[Playtime] Dynmap Config:", { ENABLE_DYNMAP, DYNMAP_URL });
       const statusEl = document.getElementById('loadingStatus');
       const crashEl = document.getElementById('crashMessage');
       const overlayEl = document.getElementById('loadingOverlay');
@@ -1429,8 +1437,40 @@
         }
       }
 
-      document.getElementById('tabPlaytime').addEventListener('click', () => { document.getElementById('tabPlaytime').classList.add('active'); document.getElementById('tabLeaderboards').classList.remove('active'); document.getElementById('viewPlaytime').style.display = 'flex'; document.getElementById('viewLeaderboards').style.display = 'none'; });
-      document.getElementById('tabLeaderboards').addEventListener('click', () => { document.getElementById('tabLeaderboards').classList.add('active'); document.getElementById('tabPlaytime').classList.remove('active'); document.getElementById('viewLeaderboards').style.display = 'flex'; document.getElementById('viewPlaytime').style.display = 'none'; if (!leaderboardsData) loadLeaderboards(); });
+      const updateTabs = (activeId) => {
+        const tabs = ['tabPlaytime', 'tabLeaderboards', 'tabDynmap'];
+        const views = ['viewPlaytime', 'viewLeaderboards', 'viewDynmap'];
+        tabs.forEach((id, i) => {
+          const btn = document.getElementById(id);
+          const view = document.getElementById(views[i]);
+          if (id === activeId) {
+            btn.classList.add('active');
+            view.style.display = (id === 'viewDynmap' || id === 'tabDynmap') ? 'block' : 'flex';
+          } else {
+            btn.classList.remove('active');
+            view.style.display = 'none';
+          }
+        });
+      };
+
+      document.getElementById('tabPlaytime').addEventListener('click', () => updateTabs('tabPlaytime'));
+      document.getElementById('tabLeaderboards').addEventListener('click', () => { 
+        updateTabs('tabLeaderboards'); 
+        if (!leaderboardsData) loadLeaderboards(); 
+      });
+      document.getElementById('tabDynmap').addEventListener('click', () => {
+        console.log("[Playtime] Switching to Dynmap tab...");
+        updateTabs('tabDynmap');
+        const frame = document.getElementById('dynmapFrame');
+        if (!frame.src || frame.src === "about:blank" || frame.src === window.location.href) {
+          console.log("[Playtime] Loading Dynmap iframe with URL:", DYNMAP_URL);
+          frame.src = DYNMAP_URL;
+        }
+      });
+
+      if (ENABLE_DYNMAP) {
+        document.getElementById('tabDynmap').style.display = 'block';
+      }
       document.getElementById('btnPie').addEventListener('click', () => { 
         currentViewMode = 'pie'; 
         document.getElementById('btnPie').style.background = 'var(--color-primary)'; 

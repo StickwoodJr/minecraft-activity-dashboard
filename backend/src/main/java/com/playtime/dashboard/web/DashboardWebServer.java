@@ -309,6 +309,10 @@ public class DashboardWebServer {
                 html = html.replace("{{SERVER_NAME}}", config.server_name != null ? config.server_name : "MC Server");
                 html = html.replace("{{DASHBOARD_TITLE}}", config.dashboard_title != null ? config.dashboard_title : "Player Activity");
                 html = html.replace("{{DASHBOARD_DESCRIPTION}}", config.dashboard_description != null ? config.dashboard_description : "Session data");
+                html = html.replace("{{ENABLE_DYNMAP}}", String.valueOf(config.enable_dynmap));
+                html = html.replace("{{DYNMAP_URL}}", config.dynmap_url != null ? config.dynmap_url : "");
+                
+                FabricDashboardMod.LOGGER.info("Serving dashboard. Dynmap enabled: " + config.enable_dynmap + ", URL: " + config.dynmap_url);
                 
                 byte[] response = html.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
