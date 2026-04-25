@@ -111,6 +111,7 @@ public class DashboardWebServer {
             httpServer.createContext("/skins/", new SkinHandler(headService));
             httpServer.createContext("/api/leaderboards", new LeaderboardHandler(leaderboardCacheFile));
             httpServer.createContext("/api/player-stats/", new PlayerStatsHandler(statsAggregator, uuidCache));
+            httpServer.createContext("/api/player-advancements/", new PlayerAdvancementsHandler(statsAggregator, uuidCache));
             httpServer.createContext("/api/live", new LiveMetricsHandler(this));
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
