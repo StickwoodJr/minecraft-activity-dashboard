@@ -19,7 +19,7 @@ public class DashboardConfig {
     public int web_port = 8105;
     public int incremental_update_interval_minutes = 5;
     public String logs_directory = ""; // Leave empty to use default (game_dir/logs)
-    public String dashboard_title = "Player Session Activity";
+    public String dashboard_title = "Activity Dashboard";
     public String dashboard_description = "Combined playtime from join/leave events";
     public String tab_title = "Playtime Dashboard";
     public String server_name = "MC Server";
@@ -31,6 +31,8 @@ public class DashboardConfig {
     public int skin_refresh_hours = 24;            // Hours before re-fetching a player's skin
     public String stats_world_name = "world"; // Minecraft world folder name
     public int leaderboard_update_interval_minutes = 10; // Can differ from incremental_update_interval_minutes
+    public boolean enable_dynmap = true;
+    public String dynmap_url = "http://149.56.155.7:8032";
 
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static DashboardConfig instance;
@@ -44,6 +46,7 @@ public class DashboardConfig {
 
     public static void load() {
         File configFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "dashboard-config.json");
+        boolean newlyCreated = false;
         if (configFile.exists()) {
             try (FileReader reader = new FileReader(configFile)) {
                 instance = GSON.fromJson(reader, DashboardConfig.class);
@@ -54,9 +57,13 @@ public class DashboardConfig {
         
         if (instance == null) {
             instance = new DashboardConfig();
+            newlyCreated = true;
         }
-        // Always save to ensure new default fields are written back to the file
-        save();
+        
+        // Only save if it's a brand new config to avoid overwriting user edits
+        if (newlyCreated) {
+            save();
+        }
     }
 
     public static void save() {
