@@ -245,17 +245,10 @@ public class LogParser {
     }
 
     private String normalizePlayer(String p) {
-        if (p == null) return null;
-        String n = p.trim();
-        Map<String, String> aliases = DashboardConfig.get().player_aliases;
-        if (aliases != null) {
-            if (aliases.containsKey(n)) return aliases.get(n).trim();
-            if (aliases.containsKey(n.toLowerCase())) return aliases.get(n.toLowerCase()).trim();
-        }
-        if (n.equalsIgnoreCase("hanger") || n.equalsIgnoreCase("advent")) {
+        if (p.equalsIgnoreCase("hanger") || p.equalsIgnoreCase("advent")) {
             return "Advent/Hanger";
         }
-        return n;
+        return p;
     }
 
     private void closeSession(String player, LocalDateTime startTs, LocalDateTime endTs, DashboardData data) {

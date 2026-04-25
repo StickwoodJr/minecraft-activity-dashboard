@@ -24,7 +24,6 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 ### 👤 Intelligent Player Profiles
 *   **3D Skin Viewer**: Real-time 3D player model rendering with walking animations.
 *   **Session Analytics**: View total playtime, session counts, average session length, and the elusive "Longest Session."
-*   **Dynamic Identity**: Support for player aliasing allows you to merge multiple accounts or UUIDs into a single display identity.
 
 ## Getting Started
 
@@ -59,7 +58,6 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `dashboard_title` | `"Player Session Activity"` | The main heading on the dashboard. |
 | `custom_logo_path` | `""` | Path to a local `.jpg` or `.png` for the dashboard logo. |
 | `ignored_players` | `["ironfarmbot", ...]` | List of player names to exclude from all stats. |
-| `player_aliases` | `{}` | Map of UUIDs or Names to a single display name. |
 | `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. |
 | `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. |
 | `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. |
