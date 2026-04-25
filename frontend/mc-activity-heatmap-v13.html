@@ -350,9 +350,9 @@
       .modal-viewer-side {
         background: oklch(from var(--color-primary) 0.15 0.04 h);
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        padding: var(--space-8); position: relative;
+        padding: var(--space-4); position: relative;
       }
-      #skinViewerWrap { width: 100%; aspect-ratio: 3/4; cursor: grab; position: relative; }
+      #skinViewerWrap { width: 100%; aspect-ratio: 2/3; cursor: grab; position: relative; }
       #skinViewerWrap:active { cursor: grabbing; }
       #skinViewerCanvas { width: 100% !important; height: 100% !important; display: block; }
       .modal-info-side { 
@@ -1235,7 +1235,8 @@
             skinViewer = new skinview3d.SkinViewer({
               canvas: skinCanvas,
               width: 300,
-              height: 600 // Increased height for even taller modal
+              height: 450,
+              zoom: 0.9
             });
             skinViewer.animation = new skinview3d.WalkingAnimation();
             skinViewer.autoRotate = false;
