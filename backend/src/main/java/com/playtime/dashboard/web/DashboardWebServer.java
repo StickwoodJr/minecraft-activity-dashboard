@@ -305,10 +305,10 @@ public class DashboardWebServer {
                 
                 String html = sb.toString();
                 DashboardConfig config = DashboardConfig.get();
-                html = html.replace("{{TAB_TITLE}}", config.tab_title);
-                html = html.replace("{{SERVER_NAME}}", config.server_name);
-                html = html.replace("{{DASHBOARD_TITLE}}", config.dashboard_title);
-                html = html.replace("{{DASHBOARD_DESCRIPTION}}", config.dashboard_description);
+                html = html.replace("{{TAB_TITLE}}", config.tab_title != null ? config.tab_title : "Playtime Dashboard");
+                html = html.replace("{{SERVER_NAME}}", config.server_name != null ? config.server_name : "MC Server");
+                html = html.replace("{{DASHBOARD_TITLE}}", config.dashboard_title != null ? config.dashboard_title : "Player Activity");
+                html = html.replace("{{DASHBOARD_DESCRIPTION}}", config.dashboard_description != null ? config.dashboard_description : "Session data");
                 
                 byte[] response = html.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
