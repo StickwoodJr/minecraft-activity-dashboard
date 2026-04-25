@@ -478,6 +478,19 @@
 
       <div class="card">
         <div class="card-title">Player Breakdown <span class="card-subtitle">total session time</span></div>
+        
+        <div class="custom-select" id="playerSortContainer" style="margin-bottom: var(--space-4); max-width: 280px;">
+          <div class="select-trigger" onclick="togglePlayerSortDropdown()">
+            <span id="selectedPlayerSortLabel">Sort by: Total Hours</span>
+            <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+          <div class="select-options" id="playerSortOptions">
+            <div class="select-option selected" onclick="selectPlayerSort('total')">Total Hours</div>
+            <div class="select-option" onclick="selectPlayerSort('sessions')">Sessions</div>
+            <div class="select-option" onclick="selectPlayerSort('avg')">Avg Session</div>
+          </div>
+        </div>
+
         <div class="table-container">
           <table class="player-table">
             <thead>
@@ -496,13 +509,25 @@
 
       <div id="viewLeaderboards" style="display:none; flex-direction:column; gap:var(--space-6);">
         <div class="card">
-          <div class="custom-select" id="statSelectContainer">
-            <div class="select-trigger" onclick="toggleStatDropdown()">
-              <span id="selectedStatLabel">Distance Traveled</span>
-              <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          <div style="display:flex; gap:var(--space-4); margin-bottom: var(--space-6);">
+            <div class="custom-select" id="statSelectContainer" style="flex:1; margin-bottom: 0;">
+              <div class="select-trigger" onclick="toggleStatDropdown()">
+                <span id="selectedStatLabel">Distance Traveled</span>
+                <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              </div>
+              <div class="select-options" id="statOptions">
+                <!-- Options dynamic -->
+              </div>
             </div>
-            <div class="select-options" id="statOptions">
-              <!-- Options dynamic -->
+            <div class="custom-select" id="orderSelectContainer" style="width: 200px; margin-bottom: 0;">
+              <div class="select-trigger" onclick="toggleOrderDropdown()">
+                <span id="selectedOrderLabel">Sort: High → Low</span>
+                <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              </div>
+              <div class="select-options" id="orderOptions">
+                <div class="select-option selected" onclick="selectOrder('desc')">High → Low</div>
+                <div class="select-option" onclick="selectOrder('asc')">Low → High</div>
+              </div>
             </div>
           </div>
           <div class="table-container">
@@ -595,6 +620,8 @@
       let ranked = [];
       let leaderboardsData = null;
       let selectedStatId = 'distance_traveled_km';
+      let leaderboardSortOrder = 'desc';
+      let playerSortMode = 'total';
       let currentViewMode = 'pie';
       let selectedDateStr = null;
       let isPanelFullscreen = false;
@@ -968,8 +995,36 @@
           }).join('');
       }
 
+      function togglePlayerSortDropdown() {
+        document.getElementById('playerSortContainer').classList.toggle('active');
+      }
+
+      function selectPlayerSort(mode) {
+        playerSortMode = mode;
+        document.getElementById('playerSortContainer').classList.remove('active');
+        const labels = { 'total': 'Total Hours', 'sessions': 'Sessions', 'avg': 'Avg Session' };
+        document.getElementById('selectedPlayerSortLabel').textContent = 'Sort by: ' + labels[mode];
+        
+        // Update options styling
+        const options = document.querySelectorAll('#playerSortOptions .select-option');
+        options.forEach(opt => {
+          if (opt.getAttribute('onclick').includes(mode)) opt.classList.add('selected');
+          else opt.classList.remove('selected');
+        });
+        
+        buildPlayerTable();
+      }
+
       function buildPlayerTable(){
-        document.getElementById('playerTableBody').innerHTML=ranked.map(([p,m],i)=>{
+        const sorted = [...ranked].sort((a, b) => {
+          const pA = a[0], pB = b[0];
+          const sdA = sessData[pA] || {}, sdB = sessData[pB] || {};
+          if (playerSortMode === 'sessions') return (sdB.sessions || 0) - (sdA.sessions || 0);
+          if (playerSortMode === 'avg') return (sdB.avg || 0) - (sdA.avg || 0);
+          return b[1] - a[1]; // default 'total'
+        });
+
+        document.getElementById('playerTableBody').innerHTML=sorted.map(([p,m],i)=>{
           const sd=sessData[p]||{};
           const avgMin=sd.avg||0;
           return `<tr onclick="showPlayerDetails('${p}')"><td><div style="display:flex;align-items:center;"><span style="display:inline-block;width:28px;">${i<3?`<span class="rank-badge ${rankClass[i]}">${i+1}</span>`:''}</span>${playerHead(p, 28)}<span style="margin-left:var(--space-2);font-weight:600;">${p}</span></div></td><td>${(m/60).toFixed(1)}h</td><td>${sd.sessions||'-'}</td><td>${avgMin<60?Math.round(avgMin)+'m':(avgMin/60).toFixed(1)+'h'}</td></tr>`;
@@ -1000,8 +1055,11 @@
 
       // Close dropdown when clicking outside
       window.addEventListener('click', e => {
-        const container = document.getElementById('statSelectContainer');
-        if (container && !container.contains(e.target)) container.classList.remove('active');
+        const containers = ['statSelectContainer', 'orderSelectContainer', 'playerSortContainer'];
+        containers.forEach(id => {
+          const el = document.getElementById(id);
+          if (el && !el.contains(e.target)) el.classList.remove('active');
+        });
       });
 
       function renderStatOptions() {
@@ -1025,12 +1083,34 @@
         renderLeaderboards(); 
       }
 
+      function toggleOrderDropdown() {
+        document.getElementById('orderSelectContainer').classList.toggle('active');
+      }
+
+      function selectOrder(order) {
+        leaderboardSortOrder = order;
+        document.getElementById('orderSelectContainer').classList.remove('active');
+        const label = order === 'desc' ? 'Sort: High → Low' : 'Sort: Low → High';
+        document.getElementById('selectedOrderLabel').textContent = label;
+        
+        // Update options styling
+        const options = document.querySelectorAll('#orderOptions .select-option');
+        options.forEach(opt => {
+          if (opt.getAttribute('onclick').includes(order)) opt.classList.add('selected');
+          else opt.classList.remove('selected');
+        });
+        
+        renderLeaderboards();
+      }
+
       function renderLeaderboards() {
         const body = document.getElementById('leaderboardBigBody');
         if (!leaderboardsData || !leaderboardsData.general) { body.innerHTML = '<tr><td colspan="3" style="text-align:center;">No data.</td></tr>'; return; }
         const statConf = STAT_CONFIG.find(s => s.id === selectedStatId);
         const players = leaderboardsData.general[selectedStatId] || {};
-        const sorted = Object.entries(players).sort((a,b) => b[1] - a[1]);
+        const sorted = Object.entries(players).sort((a,b) => {
+          return leaderboardSortOrder === 'desc' ? b[1] - a[1] : a[1] - b[1];
+        });
         if (!sorted.length) { body.innerHTML = `<tr><td colspan="3" style="text-align:center;">No data for ${statConf.label}</td></tr>`; return; }
         body.innerHTML = sorted.map(([p, val], i) => `
           <tr onclick="showPlayerDetails('${p}')">
