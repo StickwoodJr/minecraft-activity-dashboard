@@ -25,6 +25,11 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **3D Skin Viewer**: Real-time 3D player model rendering with walking animations.
 *   **Session Analytics**: View total playtime, session counts, average session length, and the elusive "Longest Session."
 
+### 🗺️ Live Dynmap Integration
+*   **Embedded World Map**: View your live [Dynmap](https://www.curseforge.com/minecraft/mc-mods/dynmap) directly inside the dashboard.
+*   **State-Preserving Tabs**: Switch between playtime stats and the live map without losing your zoom level or position.
+*   **Togglable**: Easily enable or disable the map tab via configuration.
+
 ## Getting Started
 
 ### Prerequisites
@@ -55,8 +60,10 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `logs_directory` | `""` | Custom path to server logs (defaults to `./logs`). |
 | `stats_world_name` | `"world"` | The name of your world folder to read stats from. |
 | `tab_title` | `"Playtime Dashboard"` | The browser tab title. |
-| `dashboard_title` | `"Player Session Activity"` | The main heading on the dashboard. |
+| `dashboard_title` | `"Activity Dashboard"` | The main heading on the dashboard. |
 | `custom_logo_path` | `""` | Path to a local `.jpg` or `.png` for the dashboard logo. |
+| `enable_dynmap` | `true` | Toggle the Dynmap tab on/off. |
+| `dynmap_url` | `"http://149.56.155.7:8032"` | The URL of your Dynmap instance. |
 | `ignored_players` | `["ironfarmbot", ...]` | List of player names to exclude from all stats. |
 | `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. |
 | `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. |
