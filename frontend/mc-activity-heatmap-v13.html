@@ -490,7 +490,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="playerTableCard">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-5);">
           <div class="card-title" style="margin-bottom:0;">Player Breakdown <span class="card-subtitle">total session time</span></div>
           
@@ -1200,6 +1200,37 @@
         selectStat(statId);
       }
 
+      function jumpToPlayerTable(sortMode) {
+        closePlayerModal();
+        const pTab = document.getElementById('tabPlaytime');
+        if (pTab) pTab.click();
+        
+        if (typeof selectPlayerSort === 'function') {
+          selectPlayerSort(sortMode);
+        }
+        
+        setTimeout(() => {
+          const el = document.getElementById('playerTableCard');
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }
+
+      function jumpToHeatmapDate(dateStr) {
+        closePlayerModal();
+        const pTab = document.getElementById('tabPlaytime');
+        if (pTab) pTab.click();
+        
+        if (!dateStr) return;
+        
+        setTimeout(() => {
+          const cell = document.querySelector(`.day-cell[data-date="${dateStr}"]`);
+          if (cell) {
+            cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => cell.click(), 400);
+          }
+        }, 100);
+      }
+
       function showPlayerDetails(name) {
         const sd = sessData[name] || {};
         document.getElementById('modalPlayerName').textContent = name;
@@ -1216,15 +1247,22 @@
         for (let h = 0; h < 24; h++) { hourlyAcc[((h - tz) % 24 + 24) % 24] = hourlyAccUtc[h]; }
         const peakH = hourlyAcc.indexOf(Math.max(...hourlyAcc));
         let peakHFmt = Math.max(...hourlyAcc) > 0 ? (peakH % 12 || 12) + (peakH < 12 ? 'am' : 'pm') : '-';
+        
         const stats = [
-          { label: 'Total Playtime', value: fmtHours(totalMinutes/60), icon: '' },
-          { label: 'Sessions', value: sd.sessions || '0', icon: '' },
-          { label: 'Avg Session', value: sd.avg < 60 ? Math.round(sd.avg)+'m' : (sd.avg/60).toFixed(1)+'h', icon: '' },
-          { label: 'Longest Session', value: sd.longestSession ? (sd.longestSession < 60 ? Math.round(sd.longestSession)+'m' : (sd.longestSession/60).toFixed(1)+'h') : '-', icon: '' },
+          { label: 'Total Playtime', value: fmtHours(totalMinutes/60), icon: '', action: "jumpToPlayerTable('total')" },
+          { label: 'Sessions', value: sd.sessions || '0', icon: '', action: "jumpToPlayerTable('sessions')" },
+          { label: 'Avg Session', value: (sd.avg || 0) < 60 ? Math.round(sd.avg || 0)+'m' : ((sd.avg || 0)/60).toFixed(1)+'h', icon: '', action: "jumpToPlayerTable('avg')" },
+          { label: 'Longest Session', value: sd.longestSession ? (sd.longestSession < 60 ? Math.round(sd.longestSession)+'m' : (sd.longestSession/60).toFixed(1)+'h') : '-', icon: '', action: `jumpToHeatmapDate('${sd.longestSessionDate || ''}')` },
           { label: 'Peak Hour', value: peakHFmt, icon: '' },
           { label: 'Most Active Month', value: peakMonthFmt, icon: '' }
         ];
-        document.getElementById('modalStats').innerHTML = stats.map(s => `<div class="stat-card"><div class="stat-icon">${s.icon}</div><div class="stat-label">${s.label}</div><div class="stat-value">${s.value}</div></div>`).join('');
+        document.getElementById('modalStats').innerHTML = stats.map(s => {
+          if (s.action) {
+            return `<div class="stat-card interactive" onclick="${s.action}"><div class="stat-icon">${s.icon}</div><div class="stat-label">${s.label}</div><div class="stat-value">${s.value}</div></div>`;
+          } else {
+            return `<div class="stat-card"><div class="stat-icon">${s.icon}</div><div class="stat-label">${s.label}</div><div class="stat-value">${s.value}</div></div>`;
+          }
+        }).join('');
         
         switchModalTab('playtime');
         document.getElementById('playerModal').classList.add('visible');
@@ -1326,9 +1364,21 @@
           for (let p in data.sessData) {
             const n = normalize(p);
             if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
-              // Note: strictly speaking sessData should be merged if multiple names map to same alias,
-              // but for Advent/Hanger they likely share same log sessions anyway if mapped at log source.
-              if (!cleanSessData[n]) cleanSessData[n] = data.sessData[p];
+              if (!cleanSessData[n]) {
+                cleanSessData[n] = { ...data.sessData[p] };
+              } else {
+                // Merge stats for aliased players
+                const s1 = cleanSessData[n];
+                const s2 = data.sessData[p];
+                const totalMins1 = s1.sessions * s1.avg;
+                const totalMins2 = s2.sessions * s2.avg;
+                s1.sessions += s2.sessions;
+                s1.avg = (totalMins1 + totalMins2) / s1.sessions;
+                if (s2.longestSession > s1.longestSession) {
+                  s1.longestSession = s2.longestSession;
+                  s1.longestSessionDate = s2.longestSessionDate;
+                }
+              }
             }
           }
           sessData = cleanSessData;

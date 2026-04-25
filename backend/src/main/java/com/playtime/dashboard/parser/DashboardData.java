@@ -13,5 +13,6 @@ public class DashboardData {
         public int sessions = 0;
         public double avg = 0.0;
         public double longestSession = 0.0;
+        public String longestSessionDate = "";
     }
 }

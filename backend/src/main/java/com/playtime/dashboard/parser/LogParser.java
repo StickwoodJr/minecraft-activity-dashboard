@@ -262,7 +262,10 @@ public class LogParser {
         double totalMinutesCombined = sData.sessions * sData.avg;
         sData.sessions++;
         sData.avg = (totalMinutesCombined + sessionTotalMinutes) / sData.sessions;
-        sData.longestSession = Math.max(sData.longestSession, sessionTotalMinutes);
+        if (sessionTotalMinutes > sData.longestSession) {
+            sData.longestSession = sessionTotalMinutes;
+            sData.longestSessionDate = startTs.toLocalDate().toString();
+        }
 
         // Distribute minutes to days/hours accurately
         LocalDateTime current = startTs;
