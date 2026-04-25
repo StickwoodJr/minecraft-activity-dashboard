@@ -3,6 +3,8 @@ package com.playtime.dashboard.web;
 import com.playtime.dashboard.FabricDashboardMod;
 import com.playtime.dashboard.config.DashboardConfig;
 import com.playtime.dashboard.parser.LogParser;
+import com.playtime.dashboard.stats.StatsAggregator;
+import com.playtime.dashboard.util.UuidCache;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -36,12 +38,18 @@ public class DashboardWebServer {
     private final LogParser parser;
     private final File cacheFile;
     private final PlayerHeadService headService;
+    private final File leaderboardCacheFile;
+    private final StatsAggregator statsAggregator;
+    private final UuidCache uuidCache;
 
     public DashboardWebServer(MinecraftServer server) {
         this.minecraftServer = server;
         this.parser = new LogParser();
         this.cacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_cache.json");
         this.headService = new PlayerHeadService(FabricLoader.getInstance().getGameDir().toFile());
+        this.leaderboardCacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_leaderboards.json");
+        this.statsAggregator = new StatsAggregator();
+        this.uuidCache = new UuidCache();
     }
 
     public void start() {
@@ -54,13 +62,15 @@ public class DashboardWebServer {
             httpServer.createContext("/api/player-meta", new PlayerMetaHandler(headService));
             httpServer.createContext("/faces/", new FaceHandler(headService));
             httpServer.createContext("/skins/", new SkinHandler(headService));
+            httpServer.createContext("/api/leaderboards", new LeaderboardHandler(leaderboardCacheFile));
+            httpServer.createContext("/api/player-stats/", new PlayerStatsHandler(statsAggregator, uuidCache));
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
             httpServer.start();
             FabricDashboardMod.LOGGER.info("Dashboard Web Server started on port " + port);
 
             // Setup scheduling
-            scheduler = Executors.newScheduledThreadPool(1);
+            scheduler = Executors.newScheduledThreadPool(2);
             
             // Run historical parse once if needed, then schedule incremental
             scheduler.execute(() -> {
@@ -84,6 +94,25 @@ public class DashboardWebServer {
                 // Trigger head fetches once after the startup parse — not on every incremental update.
                 // New players discovered later will have their heads fetched on-demand by the FaceHandler.
                 triggerHeadFetches();
+
+                long lbDelay = DashboardConfig.get().leaderboard_update_interval_minutes;
+                scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        java.nio.file.Path statsDir = FabricLoader.getInstance().getGameDir()
+                            .resolve(DashboardConfig.get().stats_world_name)
+                            .resolve("stats");
+                        uuidCache.refresh(); // Re-read usercache.json
+                        Map<String, Map<String, Map<String, Integer>>> leaderboards = statsAggregator.buildLeaderboards(statsDir, uuidCache);
+                        
+                        File tempFile = new File(leaderboardCacheFile.getParentFile(), leaderboardCacheFile.getName() + ".tmp");
+                        try (java.io.FileWriter writer = new java.io.FileWriter(tempFile)) {
+                            new com.google.gson.Gson().toJson(leaderboards, writer);
+                        }
+                        java.nio.file.Files.move(tempFile.toPath(), leaderboardCacheFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                    } catch (Exception e) {
+                        FabricDashboardMod.LOGGER.error("Leaderboard aggregation failed", e);
+                    }
+                }, 0, lbDelay, TimeUnit.MINUTES);
 
                 long delay = DashboardConfig.get().incremental_update_interval_minutes;
                 scheduler.scheduleAtFixedRate(() -> {
