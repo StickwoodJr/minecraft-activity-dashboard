@@ -113,6 +113,7 @@ public class DashboardWebServer {
             httpServer.createContext("/api/player-stats/", new PlayerStatsHandler(statsAggregator, uuidCache));
             httpServer.createContext("/api/player-advancements/", new PlayerAdvancementsHandler(statsAggregator, uuidCache));
             httpServer.createContext("/api/live", new LiveMetricsHandler(this));
+            httpServer.createContext("/api/events", new EventsHandler());
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
             httpServer.start();

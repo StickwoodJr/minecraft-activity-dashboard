@@ -42,6 +42,11 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Live Player List**: See who is online right now. Click any online player to jump straight to their full activity history.
 *   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
 
+### 🎖️ Server Events & Competitions
+*   **Admin-Driven Events**: Create timed competitions (e.g., "Most Hours This Week" or "Most Mob Kills") using `/dashboard event create`.
+*   **Live Scoreboards**: Progress is tracked in real-time on a premium in-game sidebar, featuring formatted time displays (`Dd Hh Mm Ss`) for playtime and hidden raw scores for a clean look.
+*   **Web Leaderboard**: A dedicated "Events" tab on the dashboard provides a live, interactive view of the competition for players outside the game.
+*   **Automatic Rewards**: At the end of each event, players earn "All-Time Points" based on their placement, which are tracked on a permanent server-wide leaderboard.
 ## Getting Started
 
 ### Prerequisites
@@ -62,6 +67,17 @@ The `syncWebAssets` task automatically copies the frontend files from `frontend/
 Once built, drop the resulting `.jar` file from `backend/build/libs/` into your server's `mods` folder and start the server.
 
 By default, the dashboard is accessible at `http://<your-server-ip>:8105`.
+
+## Server Commands
+All commands require Operator level 2 permission.
+
+| Command | Description |
+| :--- | :--- |
+| `/dashboard event create <type> <hours> <title>` | Start a new timed event (playtime, mob_kills, blocks_placed, blocks_mined). |
+| `/dashboard event stop` | Manually end the current event and distribute points. |
+| `/dashboard event status` | View details and remaining time for the active event. |
+| `/dashboard event clearpoints all [amount]` | Clear or reduce all-time points for all players. |
+| `/dashboard event clearpoints user <name> [amount]` | Clear or reduce all-time points for a specific player. |
 
 ## Configuration
 Settings are managed via `config/dashboard-config.json`. The file is automatically generated on first run.

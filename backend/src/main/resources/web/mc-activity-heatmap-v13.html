@@ -657,6 +657,7 @@
       <div style="display:flex; gap:var(--space-4); border-bottom:1px solid var(--color-divider); margin-bottom:var(--space-2);">
         <button id="tabPlaytime" class="tab-btn active">Playtime</button>
         <button id="tabLeaderboards" class="tab-btn">Leaderboards</button>
+        <button id="tabEvents" class="tab-btn">Events</button>
         <button id="tabLive" class="tab-btn" style="display:{{LIVE_TAB_DISPLAY}};">Live</button>
         <button id="tabDynmap" class="tab-btn" style="display:none;">Dynmap</button>
       </div>
@@ -767,6 +768,59 @@
         </div>
       </div>
       </div> <!-- end viewPlaytime -->
+
+      <div id="viewEvents" style="display:none; flex-direction:column; gap:var(--space-6);">
+        <p class="page-sub" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">Compete with other players in time-limited server events!</p>
+        
+        <div id="activeEventCard" class="card" style="display:none; border-color: var(--color-primary); background: oklch(from var(--color-primary) 0.12 0.03 h);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: var(--space-4);">
+            <div>
+              <div style="font-size: var(--text-xs); color: var(--color-primary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">Active Event</div>
+              <h2 id="eventTitle" style="font-size: var(--text-lg); font-weight: 700; margin-bottom: 4px;">Loading...</h2>
+              <div id="eventGoal" style="font-size: var(--text-sm); color: var(--color-text-muted);"></div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: var(--text-xs); color: var(--color-text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">Time Remaining</div>
+              <div id="eventTimer" style="font-size: var(--text-lg); font-weight: 700; color: var(--color-primary);">--:--:--</div>
+            </div>
+          </div>
+          
+          <div class="table-container">
+            <table class="player-table">
+              <thead>
+                <tr>
+                  <th style="width: 80px;">Rank</th>
+                  <th>Player</th>
+                  <th style="text-align: right;" id="eventStatHeader">Score</th>
+                </tr>
+              </thead>
+              <tbody id="eventLeaderboardBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="noActiveEvent" class="card" style="text-align:center; padding: var(--space-12) 0; color: var(--color-text-faint);">
+          <svg style="margin-bottom: var(--space-4); color: var(--color-divider);" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          <div style="font-size: var(--text-base); font-weight: 600;">No active event.</div>
+          <div style="font-size: var(--text-sm);">Check back later or ask an admin to start one!</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">All-Time Event Points <span class="card-subtitle">earned from previous events</span></div>
+          <div class="table-container">
+            <table class="player-table">
+              <thead>
+                <tr>
+                  <th style="width: 80px;">Rank</th>
+                  <th>Player</th>
+                  <th style="text-align: right;">Points</th>
+                </tr>
+              </thead>
+              <tbody id="allTimePointsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div> <!-- end viewEvents -->
 
       <div id="viewLeaderboards" style="display:none; flex-direction:column; gap:var(--space-6);">
         <p class="page-sub" id="pageSubLeaderboards" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">{{DASHBOARD_DESCRIPTION}}</p>
@@ -2203,8 +2257,8 @@
       }
 
       const updateTabs = (activeId) => {
-        const tabs = ['tabPlaytime', 'tabLeaderboards', 'tabLive', 'tabDynmap'];
-        const views = ['viewPlaytime', 'viewLeaderboards', 'viewLive', 'viewDynmap'];
+        const tabs = ['tabPlaytime', 'tabLeaderboards', 'tabEvents', 'tabLive', 'tabDynmap'];
+        const views = ['viewPlaytime', 'viewLeaderboards', 'viewEvents', 'viewLive', 'viewDynmap'];
         tabs.forEach((id, i) => {
           const btn = document.getElementById(id);
           const view = document.getElementById(views[i]);
@@ -2212,7 +2266,6 @@
           if (id === activeId) {
             btn.classList.add('active');
             view.style.display = (id === 'tabDynmap' || id === 'tabLive' || id === 'viewDynmap' || id === 'viewLive') ? 'flex' : 'flex'; 
-            // Correct display logic: use flex for all views except maybe dynmap if it prefers block
             if (id === 'tabDynmap' || id === 'viewDynmap') view.style.display = 'block';
             else view.style.display = 'flex';
           } else {
@@ -2226,7 +2279,149 @@
         } else {
           stopLivePolling();
         }
+
+        if (activeId === 'tabEvents') {
+          startEventsPolling();
+        } else {
+          stopEventsPolling();
+        }
       };
+
+      let eventsPollTimer = null;
+      async function fetchEvents() {
+        try {
+          const res = await fetch('/api/events');
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          renderEvents(data);
+        } catch (e) {
+          console.error("[Events] Fetch failed:", e);
+        }
+      }
+
+      function startEventsPolling() {
+        if (eventsPollTimer) return;
+        fetchEvents();
+        eventsPollTimer = setInterval(fetchEvents, 5000);
+      }
+
+      function stopEventsPolling() {
+        if (!eventsPollTimer) return;
+        clearInterval(eventsPollTimer);
+        eventsPollTimer = null;
+      }
+
+      let eventsData = null;
+
+      function renderEvents(data) {
+        eventsData = data;
+        const active = data.activeEvent;
+        const allTime = data.allTimePoints || {};
+
+        const activeCard = document.getElementById('activeEventCard');
+        const noActive = document.getElementById('noActiveEvent');
+
+        if (active && active.isActive) {
+          activeCard.style.display = 'block';
+          noActive.style.display = 'none';
+          document.getElementById('eventTitle').textContent = active.title;
+          
+          const typeLabels = {
+            'playtime': 'Playtime (Minutes)',
+            'blocks_placed': 'Blocks Placed',
+            'blocks_mined': 'Blocks Mined',
+            'mob_kills': 'Mob Kills'
+          };
+          document.getElementById('eventGoal').textContent = `Goal: ${typeLabels[active.type] || active.type}`;
+          document.getElementById('eventStatHeader').textContent = typeLabels[active.type] || 'Score';
+
+          // Timer
+          const updateTimer = () => {
+            const now = Date.now();
+            const diff = active.endTime - now;
+            if (diff <= 0) {
+              document.getElementById('eventTimer').textContent = "00:00:00";
+              return;
+            }
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            document.getElementById('eventTimer').textContent = 
+              `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+          };
+          updateTimer();
+
+          // Leaderboard
+          const lbBody = document.getElementById('eventLeaderboardBody');
+          const scores = Object.entries(active.currentScores || {})
+            .sort((a,b) => b[1] - a[1]);
+          
+          if (scores.length === 0) {
+            lbBody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 2rem; color: var(--color-text-faint);">No scores yet. Get started!</td></tr>';
+          } else {
+            lbBody.innerHTML = scores.map(([uuid, val], i) => {
+              let scoreDisplay = val.toLocaleString();
+              if (active.type === 'playtime') {
+                const d = Math.floor(val / 86400);
+                const h = Math.floor((val % 86400) / 3600);
+                const m = Math.floor((val % 3600) / 60);
+                const s = val % 60;
+                scoreDisplay = (d > 0 ? d + 'd ' : '') + 
+                               (h > 0 || d > 0 ? h + 'h ' : '') + 
+                               (m > 0 || h > 0 || d > 0 ? m + 'm ' : '') + 
+                               s + 's';
+              }
+              return `
+                <tr onclick="showPlayerDetails('${getPlayerNameByUuid(uuid)}')">
+                  <td><span class="rank-badge ${i < 3 ? rankClass[i] : ''}">${i + 1}</span></td>
+                  <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${getPlayerNameByUuid(uuid)}</span></div></td>
+                  <td style="text-align: right; font-weight: 700;">${scoreDisplay}</td>
+                </tr>
+              `;
+            }).join('');
+          }
+        } else {
+          activeCard.style.display = 'none';
+          noActive.style.display = 'block';
+        }
+
+        // All-Time
+        const allTimeBody = document.getElementById('allTimePointsBody');
+        const sortedAllTime = Object.entries(allTime).sort((a,b) => b[1] - a[1]);
+        if (sortedAllTime.length === 0) {
+          allTimeBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No points awarded yet.</td></tr>';
+        } else {
+          allTimeBody.innerHTML = sortedAllTime.map(([uuid, pts], i) => `
+            <tr onclick="showPlayerDetails('${getPlayerNameByUuid(uuid)}')">
+              <td><span class="rank-badge ${i < 3 ? rankClass[i] : ''}">${i + 1}</span></td>
+              <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${getPlayerNameByUuid(uuid)}</span></div></td>
+              <td style="text-align: right; font-weight: 700; color: var(--color-primary);">${pts.toLocaleString()} pts</td>
+            </tr>
+          `).join('');
+        }
+      }
+
+      function getPlayerNameByUuid(uuid) {
+        if (!uuid) return "Unknown";
+        // 1. Check uuidToName map from events API
+        if (eventsData && eventsData.uuidToName && eventsData.uuidToName[uuid]) {
+          return eventsData.uuidToName[uuid];
+        }
+        // 2. Check PLAYER_META (name -> {uuid, colorHex})
+        for (const [name, meta] of Object.entries(PLAYER_META)) {
+          if (meta.uuid === uuid) return name;
+        }
+        // 3. Check sessData keys (names)
+        for (const name of Object.keys(sessData)) {
+          if (name === uuid) return name;
+        }
+        return uuid;
+      }
+
+      function playerHeadByUuid(uuid, size) {
+        const name = getPlayerNameByUuid(uuid);
+        return `<img src="/faces/${encodeURIComponent(name)}.png" class="player-head" width="${size}" height="${size}" onerror="this.src='/faces/default_head.png'">`;
+      }
 
       async function fetchLiveMetrics() {
         try {
@@ -2349,11 +2544,14 @@
         lastUpd.style.color = "var(--color-text-muted)";
       }
 
-      document.getElementById('tabPlaytime').addEventListener('click', () => updateTabs('tabPlaytime'));
-      document.getElementById('tabLeaderboards').addEventListener('click', () => { 
+      document.getElementById('tabPlaytime').onclick = () => updateTabs('tabPlaytime');
+      document.getElementById('tabLeaderboards').onclick = () => { 
         updateTabs('tabLeaderboards'); 
         if (!leaderboardsData) loadLeaderboards(); 
-      });
+      };
+      document.getElementById('tabEvents').onclick = () => updateTabs('tabEvents');
+      document.getElementById('tabLive').onclick = () => updateTabs('tabLive');
+      document.getElementById('tabDynmap').onclick = () => updateTabs('tabDynmap');
       document.getElementById('tabLive').addEventListener('click', () => updateTabs('tabLive'));
       document.getElementById('tabDynmap').addEventListener('click', () => {
         console.log("[Playtime] Switching to Dynmap tab...");

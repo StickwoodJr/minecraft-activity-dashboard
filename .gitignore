@@ -26,3 +26,6 @@ dashboard-config.json
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Build artifacts
+backend/src/main/resources/web/
