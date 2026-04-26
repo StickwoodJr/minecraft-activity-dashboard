@@ -40,6 +40,7 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Real-Time Metrics**: Monitor Server TPS, MSPT (Tick Times), CPU usage, and JVM Memory directly from the dashboard.
 *   **Container Optimized**: Specialized support for Pterodactyl/Docker environments, reporting actual folder size (`/home/container`) rather than misleading host partition data.
 *   **Live Player List**: See who is online right now. Click any online player to jump straight to their full activity history.
+*   **Header KPI Widget**: Monitor players, TPS, and MSPT instantly from the main header, regardless of which tab you are currently viewing.
 *   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
 
 ### 🎖️ Server Events & Competitions
