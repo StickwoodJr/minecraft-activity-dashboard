@@ -986,7 +986,7 @@
       let ranked = [];
       let leaderboardsData = null;
       let ignoredPlayers = [];
-      let selectedStatId = 'distance_traveled_km';
+      let selectedStatId = 'all_time_event_points';
       let leaderboardSortOrder = 'desc';
       let playerSortMode = 'total';
       let currentViewMode = 'pie';
@@ -1012,24 +1012,24 @@
 
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
       const STAT_CONFIG = [
-        { id: 'distance_traveled_km', name: 'Total Distance Traveled', label: 'Distance Traveled', suffix: ' km' },
-        { id: 'playstyle_explorer', name: 'Playstyle: Explorer', label: 'Explorer Score', suffix: '%' },
-        { id: 'playstyle_builder', name: 'Playstyle: Builder', label: 'Builder Score', suffix: '%' },
-        { id: 'playstyle_fighter', name: 'Playstyle: Fighter', label: 'Fighter Score', suffix: '%' },
-        { id: 'playstyle_redstoner', name: 'Playstyle: Redstoner', label: 'Redstoner Score', suffix: '%' },
-        { id: 'total_blocks_broken', name: 'Total Blocks Broken', label: 'Blocks Broken', suffix: '' },
-        { id: 'total_blocks_placed', name: 'Total Blocks Placed', label: 'Blocks Placed', suffix: '' },
-        { id: 'player_kills', name: 'Players Killed', label: 'Players Killed', suffix: '' },
-        { id: 'mob_kills', name: 'Mobs Killed', label: 'Mobs Killed', suffix: '' },
-        { id: 'deaths', name: 'Total Deaths', label: 'Total Deaths', suffix: '' },
-        { id: 'damage_taken_hearts', name: 'Damage Taken (Hearts)', label: 'Damage Taken', suffix: ' Hearts' },
-        { id: 'damage_dealt_hearts', name: 'Damage Dealt (Hearts)', label: 'Damage Dealt', suffix: ' Hearts' },
         { id: 'all_time_event_points', name: 'All-Time Event Points', label: 'Event Points', suffix: '' },
+        { id: 'distance_traveled_km', name: 'Total Distance Traveled', label: 'Distance Traveled', suffix: ' km' },
+        { id: 'total_blocks_placed', name: 'Total Blocks Placed', label: 'Blocks Placed', suffix: '' },
+        { id: 'total_blocks_broken', name: 'Total Blocks Broken', label: 'Blocks Broken', suffix: '' },
+        { id: 'mob_kills', name: 'Mobs Killed', label: 'Mobs Killed', suffix: '' },
+        { id: 'damage_dealt_hearts', name: 'Damage Dealt (Hearts)', label: 'Damage Dealt', suffix: ' Hearts' },
+        { id: 'damage_taken_hearts', name: 'Damage Taken (Hearts)', label: 'Damage Taken', suffix: ' Hearts' },
+        { id: 'player_kills', name: 'Players Killed', label: 'Players Killed', suffix: '' },
+        { id: 'deaths', name: 'Total Deaths', label: 'Total Deaths', suffix: '' },
         { id: 'totem_of_undying', name: 'Totems of Undying Used', label: 'Totems Used', suffix: '' },
         { id: 'talked_to_villager', name: 'Times Talked to Villager', label: 'Talked to Villager', suffix: '' },
         { id: 'silverfish', name: 'Silverfish Killed', label: 'Silverfish Killed', suffix: '' },
         { id: 'wither', name: 'Withers Killed', label: 'Withers Killed', suffix: '' },
-        { id: 'ender_dragon', name: 'Ender Dragons Killed', label: 'Dragons Killed', suffix: '' }
+        { id: 'ender_dragon', name: 'Ender Dragons Killed', label: 'Dragons Killed', suffix: '' },
+        { id: 'playstyle_explorer', name: 'Playstyle: Explorer', label: 'Explorer Score', suffix: '%' },
+        { id: 'playstyle_builder', name: 'Playstyle: Builder', label: 'Builder Score', suffix: '%' },
+        { id: 'playstyle_fighter', name: 'Playstyle: Fighter', label: 'Fighter Score', suffix: '%' },
+        { id: 'playstyle_redstoner', name: 'Playstyle: Redstoner', label: 'Redstoner Score', suffix: '%' }
       ];
 
       function updateFullscreenIcon() {
