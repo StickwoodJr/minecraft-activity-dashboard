@@ -495,11 +495,67 @@
       }
 
       /* Search Components */
+      .header-actions {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-5);
+        margin-left: auto;
+      }
       .search-container {
         position: relative;
-        width: 100%;
-        max-width: 320px;
-        margin-left: auto;
+        flex: 1;
+        max-width: 220px;
+      }
+      .live-widget {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: var(--space-4);
+        background: var(--color-surface);
+        border: 1px solid oklch(from var(--color-text) l c h / 0.08);
+        border-radius: var(--radius-lg);
+        cursor: pointer;
+        transition: all var(--transition);
+        white-space: nowrap;
+        user-select: none;
+        box-shadow: var(--shadow-sm);
+        min-width: 180px;
+      }
+      .live-widget:hover {
+        background: var(--color-surface-offset);
+        border-color: var(--color-primary);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+      }
+      .live-widget-label {
+        font-size: 13px;
+        color: var(--color-text-faint);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 6px;
+      }
+      .live-widget-value {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        line-height: 1.1;
+      }
+      .live-widget-sub-label {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--color-text-faint);
+      }
+      .live-widget-players, .live-widget-tps, .live-widget-mspt {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--color-text);
+      }
+      .widget-separator {
+        color: var(--color-divider);
+        font-size: 12px;
+        user-select: none;
       }
       .search-input-wrap {
         position: relative;
@@ -529,7 +585,7 @@
         background: var(--color-surface-offset);
         box-shadow: 0 0 0 2px var(--color-primary-highlight);
       }
-      .search-shortcut {
+      .search-kbd {
         position: absolute;
         right: 12px;
         padding: 2px 6px;
@@ -642,13 +698,27 @@
         <div>
           <h1 class="page-title">{{DASHBOARD_TITLE}}</h1>
         </div>
-        <div class="search-container" id="headerSearchContainer">
-          <div class="search-input-wrap">
-            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="text" class="search-input" id="headerSearchInput" placeholder="Search players..." autocomplete="off">
-            <div class="search-shortcut">⌘K</div>
+
+        <div class="header-actions">
+          <div class="search-container" id="headerSearchContainer">
+            <div class="search-input-wrap">
+              <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+              <input type="text" class="search-input" id="headerSearchInput" placeholder="Search players..." autocomplete="off">
+              <div class="search-kbd">⌘K</div>
+            </div>
+            <div class="search-results" id="headerSearchResults"></div>
           </div>
-          <div class="search-results" id="headerSearchResults"></div>
+          <div class="live-widget" id="liveWidget" onclick="updateTabs('tabLive')" style="display:{{LIVE_TAB_DISPLAY}};">
+            <div class="live-widget-label">Server Status</div>
+            <div class="live-widget-value">
+              <span class="live-widget-sub-label">Players:</span>
+              <span id="liveWidgetPlayers" class="live-widget-players">0 / 0</span>
+              <span class="widget-separator">•</span>
+              <span id="liveWidgetTps" class="live-widget-tps">0.0 TPS</span>
+              <span class="widget-separator">•</span>
+              <span id="liveWidgetMspt" class="live-widget-mspt">0.0ms</span>
+            </div>
+          </div>
         </div>
       </div>
     </header>
@@ -658,7 +728,6 @@
         <button id="tabPlaytime" class="tab-btn active">Playtime</button>
         <button id="tabLeaderboards" class="tab-btn">Leaderboards</button>
         <button id="tabEvents" class="tab-btn">Events</button>
-        <button id="tabLive" class="tab-btn" style="display:{{LIVE_TAB_DISPLAY}};">Live</button>
         <button id="tabDynmap" class="tab-btn" style="display:none;">Dynmap</button>
       </div>
 
@@ -850,8 +919,8 @@
 
       </div>
       
-      <div id="viewLive" style="display:none; flex-direction:column; gap:var(--space-6);">
-        <p class="page-sub" id="liveLastUpdate" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">Last update: never</p>
+      <div id="viewLive" style="display:none; flex-direction:column; gap:var(--space-3);">
+        <p class="page-sub" id="liveLastUpdate" style="margin-top: 0; margin-bottom: 0;">Last update: never</p>
         <div class="kpi-row" id="liveKpiRow">
           <div class="kpi">
             <div class="kpi-label">Players Online</div>
@@ -1728,7 +1797,7 @@
           const isOnline = liveState && liveState.playerNames && liveState.playerNames.includes(name);
           statusDot.className = 'status-dot ' + (isOnline ? 'status-online' : 'status-offline');
           if (statusTooltip) statusTooltip.textContent = isOnline ? 'Online' : 'Offline';
-          statusDot.onclick = () => { closePlayerModal(); document.getElementById('tabLive').click(); };
+          statusDot.onclick = () => { closePlayerModal(); updateTabs('tabLive'); };
           
           // If we don't have recent live data, fetch it once to update the dot
           if (!liveState || (Date.now() - liveState.timestamp > 60000)) {
@@ -2293,6 +2362,7 @@
           initSearch();
 
           console.log("[Playtime] Load complete.");
+          startLivePolling(); // Start polling for header widget
           hideOverlay();
         } catch (e) { 
           console.error("Load failed:", e); 
@@ -2313,22 +2383,21 @@
         tabs.forEach((id, i) => {
           const btn = document.getElementById(id);
           const view = document.getElementById(views[i]);
-          if (!btn || !view) return;
+          if (!view) return;
+          
           if (id === activeId) {
-            btn.classList.add('active');
-            view.style.display = (id === 'tabDynmap' || id === 'tabLive' || id === 'viewDynmap' || id === 'viewLive') ? 'flex' : 'flex'; 
-            if (id === 'tabDynmap' || id === 'viewDynmap') view.style.display = 'block';
+            if (btn) btn.classList.add('active');
+            // Ensure Live and Dynmap views are shown as block/flex depending on need
+            if (id === 'tabDynmap') view.style.display = 'block';
             else view.style.display = 'flex';
           } else {
-            btn.classList.remove('active');
+            if (btn) btn.classList.remove('active');
             view.style.display = 'none';
           }
         });
         
         if (activeId === 'tabLive') {
           startLivePolling();
-        } else {
-          stopLivePolling();
         }
 
         if (activeId === 'tabEvents') {
@@ -2523,6 +2592,24 @@
         else if (data.tps >= 15) tpsEl.style.color = "#e6a23c";
         else tpsEl.style.color = "#f56c6c";
         
+        // Widget Updates
+        const widgetPlayers = document.getElementById('liveWidgetPlayers');
+        const widgetTps = document.getElementById('liveWidgetTps');
+        if (widgetPlayers) widgetPlayers.textContent = `${data.playersOnline} / ${data.maxPlayers}`;
+        if (widgetTps) {
+          widgetTps.textContent = `${tps} TPS`;
+          if (data.tps >= 19) widgetTps.style.color = "#67c23a";
+          else if (data.tps >= 15) widgetTps.style.color = "#e6a23c";
+          else widgetTps.style.color = "#f56c6c";
+        }
+        const widgetMspt = document.getElementById('liveWidgetMspt');
+        if (widgetMspt) {
+          widgetMspt.textContent = `${data.mspt.toFixed(1)}ms`;
+          if (data.mspt < 35) widgetMspt.style.color = "#67c23a";
+          else if (data.mspt < 50) widgetMspt.style.color = "#e6a23c";
+          else widgetMspt.style.color = "#f56c6c";
+        }
+        
         // MSPT
         const msptEl = document.getElementById('liveMsptValue');
         msptEl.textContent = `${data.mspt.toFixed(1)} ms`;
@@ -2605,10 +2692,7 @@
         if (!leaderboardsData) loadLeaderboards(); 
       };
       document.getElementById('tabEvents').onclick = () => updateTabs('tabEvents');
-      document.getElementById('tabLive').onclick = () => updateTabs('tabLive');
-      document.getElementById('tabDynmap').onclick = () => updateTabs('tabDynmap');
-      document.getElementById('tabLive').addEventListener('click', () => updateTabs('tabLive'));
-      document.getElementById('tabDynmap').addEventListener('click', () => {
+      document.getElementById('tabDynmap').onclick = () => {
         console.log("[Playtime] Switching to Dynmap tab...");
         updateTabs('tabDynmap');
         const frame = document.getElementById('dynmapFrame');
@@ -2616,7 +2700,7 @@
           console.log("[Playtime] Loading Dynmap iframe with URL:", DYNMAP_URL);
           frame.src = DYNMAP_URL;
         }
-      });
+      };
 
       if (ENABLE_DYNMAP) {
         document.getElementById('tabDynmap').style.display = 'block';
