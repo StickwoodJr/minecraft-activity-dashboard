@@ -24,8 +24,8 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
     *   Total Distance Traveled (converted to km)
     *   Player Kills & Mob Kills
     *   Deaths & Damage Taken/Dealt
-    *   Special stats like Totems Used, Times Slept, and more.
-*   **Interactive Sorting**: Sort leaderboards by any metric and click players to view their full activity profile.
+    *   Special stats like Totems Used, Event Points, and more.
+*   **Interactive Sorting**: Search and sort leaderboards by any metric and click players to view their full activity profile.
 
 ### 👤 Intelligent Player Profiles
 *   **3D Skin Viewer**: Real-time 3D player model rendering with walking animations.

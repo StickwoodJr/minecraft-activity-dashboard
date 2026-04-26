@@ -805,21 +805,6 @@
           <div style="font-size: var(--text-sm);">Check back later or ask an admin to start one!</div>
         </div>
 
-        <div class="card">
-          <div class="card-title">All-Time Event Points <span class="card-subtitle">earned from previous events</span></div>
-          <div class="table-container">
-            <table class="player-table">
-              <thead>
-                <tr>
-                  <th style="width: 80px;">Rank</th>
-                  <th>Player</th>
-                  <th style="text-align: right;">Points</th>
-                </tr>
-              </thead>
-              <tbody id="allTimePointsBody"></tbody>
-            </table>
-          </div>
-        </div>
       </div> <!-- end viewEvents -->
 
       <div id="viewLeaderboards" style="display:none; flex-direction:column; gap:var(--space-6);">
@@ -827,9 +812,10 @@
         <div class="card">
           <div style="display:flex; gap:var(--space-4); margin-bottom: var(--space-6);">
             <div class="custom-select" id="statSelectContainer" style="flex:1; margin-bottom: 0;">
-              <div class="select-trigger" onclick="toggleStatDropdown()">
-                <span id="selectedStatLabel">Distance Traveled</span>
-                <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              <div class="select-trigger" style="padding: 0; overflow: hidden; display: flex; align-items: center;" onclick="document.getElementById('statSearchInput').focus()">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--color-text-faint)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left: var(--space-5); flex-shrink: 0;"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+                <input type="text" id="statSearchInput" placeholder="Search leaderboards..." autocomplete="off" oninput="filterStatOptions()" onfocus="openStatDropdown()" style="width: 100%; height: 100%; padding: calc(var(--space-3) + 2px) var(--space-4); border: none; background: transparent; color: var(--color-text); font-size: var(--text-base); font-weight: 600; outline: none; cursor: text;">
+                <svg class="select-arrow" style="margin-right: var(--space-5); flex-shrink: 0; cursor: pointer;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" onclick="toggleStatDropdown(event)"><path d="m6 9 6 6 6-6"/></svg>
               </div>
               <div class="select-options" id="statOptions">
                 <!-- Options dynamic -->
@@ -861,6 +847,7 @@
             </table>
           </div>
         </div>
+
       </div>
       
       <div id="viewLive" style="display:none; flex-direction:column; gap:var(--space-6);">
@@ -999,7 +986,7 @@
       let ranked = [];
       let leaderboardsData = null;
       let ignoredPlayers = [];
-      let selectedStatId = 'distance_traveled_km';
+      let selectedStatId = 'all_time_event_points';
       let leaderboardSortOrder = 'desc';
       let playerSortMode = 'total';
       let currentViewMode = 'pie';
@@ -1025,24 +1012,24 @@
 
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
       const STAT_CONFIG = [
+        { id: 'all_time_event_points', name: 'All-Time Event Points', label: 'Event Points', suffix: '' },
         { id: 'distance_traveled_km', name: 'Total Distance Traveled', label: 'Distance Traveled', suffix: ' km' },
-        { id: 'playstyle_explorer', name: 'Playstyle: Explorer', label: 'Explorer Score', suffix: '%' },
-        { id: 'playstyle_builder', name: 'Playstyle: Builder', label: 'Builder Score', suffix: '%' },
-        { id: 'playstyle_fighter', name: 'Playstyle: Fighter', label: 'Fighter Score', suffix: '%' },
-        { id: 'playstyle_redstoner', name: 'Playstyle: Redstoner', label: 'Redstoner Score', suffix: '%' },
-        { id: 'total_blocks_broken', name: 'Total Blocks Broken', label: 'Blocks Broken', suffix: '' },
         { id: 'total_blocks_placed', name: 'Total Blocks Placed', label: 'Blocks Placed', suffix: '' },
-        { id: 'player_kills', name: 'Players Killed', label: 'Players Killed', suffix: '' },
+        { id: 'total_blocks_broken', name: 'Total Blocks Broken', label: 'Blocks Broken', suffix: '' },
         { id: 'mob_kills', name: 'Mobs Killed', label: 'Mobs Killed', suffix: '' },
-        { id: 'deaths', name: 'Total Deaths', label: 'Total Deaths', suffix: '' },
-        { id: 'damage_taken_hearts', name: 'Damage Taken (Hearts)', label: 'Damage Taken', suffix: ' Hearts' },
         { id: 'damage_dealt_hearts', name: 'Damage Dealt (Hearts)', label: 'Damage Dealt', suffix: ' Hearts' },
-        { id: 'sleep_in_bed', name: 'Times Slept in Bed', label: 'Times Slept', suffix: '' },
+        { id: 'damage_taken_hearts', name: 'Damage Taken (Hearts)', label: 'Damage Taken', suffix: ' Hearts' },
+        { id: 'player_kills', name: 'Players Killed', label: 'Players Killed', suffix: '' },
+        { id: 'deaths', name: 'Total Deaths', label: 'Total Deaths', suffix: '' },
         { id: 'totem_of_undying', name: 'Totems of Undying Used', label: 'Totems Used', suffix: '' },
         { id: 'talked_to_villager', name: 'Times Talked to Villager', label: 'Talked to Villager', suffix: '' },
         { id: 'silverfish', name: 'Silverfish Killed', label: 'Silverfish Killed', suffix: '' },
         { id: 'wither', name: 'Withers Killed', label: 'Withers Killed', suffix: '' },
-        { id: 'ender_dragon', name: 'Ender Dragons Killed', label: 'Dragons Killed', suffix: '' }
+        { id: 'ender_dragon', name: 'Ender Dragons Killed', label: 'Dragons Killed', suffix: '' },
+        { id: 'playstyle_explorer', name: 'Playstyle: Explorer', label: 'Explorer Score', suffix: '%' },
+        { id: 'playstyle_builder', name: 'Playstyle: Builder', label: 'Builder Score', suffix: '%' },
+        { id: 'playstyle_fighter', name: 'Playstyle: Fighter', label: 'Fighter Score', suffix: '%' },
+        { id: 'playstyle_redstoner', name: 'Playstyle: Redstoner', label: 'Redstoner Score', suffix: '%' }
       ];
 
       function updateFullscreenIcon() {
@@ -1514,8 +1501,41 @@
         } catch (e) { document.getElementById('leaderboardBigBody').innerHTML = '<tr><td colspan="3" style="text-align:center;">Failed to load.</td></tr>'; }
       }
 
-      function toggleStatDropdown() {
-        document.getElementById('statSelectContainer').classList.toggle('active');
+      function toggleStatDropdown(e) {
+        if (e) { e.stopPropagation(); e.preventDefault(); }
+        const container = document.getElementById('statSelectContainer');
+        container.classList.toggle('active');
+        const searchInput = document.getElementById('statSearchInput');
+        if (container.classList.contains('active')) {
+          searchInput.focus();
+          searchInput.value = '';
+          filterStatOptions();
+        } else {
+          const selectedConf = STAT_CONFIG.find(s => s.id === selectedStatId);
+          if (selectedConf && searchInput) searchInput.value = selectedConf.name;
+        }
+      }
+
+      function openStatDropdown() {
+        const container = document.getElementById('statSelectContainer');
+        if (!container.classList.contains('active')) {
+          container.classList.add('active');
+          const searchInput = document.getElementById('statSearchInput');
+          searchInput.value = '';
+          filterStatOptions();
+        }
+      }
+
+      function filterStatOptions() {
+        const query = document.getElementById('statSearchInput').value.toLowerCase();
+        const options = document.querySelectorAll('#statOptions .select-option');
+        options.forEach(opt => {
+          if (opt.textContent.toLowerCase().includes(query)) {
+            opt.style.display = 'block';
+          } else {
+            opt.style.display = 'none';
+          }
+        });
       }
 
       // Close dropdown when clicking outside
@@ -1523,15 +1543,26 @@
         const containers = ['statSelectContainer', 'orderSelectContainer', 'playerSortContainer'];
         containers.forEach(id => {
           const el = document.getElementById(id);
-          if (el && !el.contains(e.target)) el.classList.remove('active');
+          if (el && !el.contains(e.target)) {
+            el.classList.remove('active');
+            if (id === 'statSelectContainer') {
+              const searchInput = document.getElementById('statSearchInput');
+              const selectedConf = STAT_CONFIG.find(s => s.id === selectedStatId);
+              if (selectedConf && searchInput) searchInput.value = selectedConf.name;
+            }
+          }
         });
       });
 
       function renderStatOptions() {
         const container = document.getElementById('statOptions');
-        const selectedLabel = document.getElementById('selectedStatLabel');
+        const searchInput = document.getElementById('statSearchInput');
         const selectedConf = STAT_CONFIG.find(s => s.id === selectedStatId);
-        if (selectedConf) selectedLabel.textContent = selectedConf.name;
+        
+        const statSelectContainer = document.getElementById('statSelectContainer');
+        if (selectedConf && searchInput && (!statSelectContainer || !statSelectContainer.classList.contains('active'))) {
+          searchInput.value = selectedConf.name;
+        }
 
         container.innerHTML = STAT_CONFIG.map(s => `
           <div class="select-option ${s.id === selectedStatId ? 'selected' : ''}" 
@@ -1766,14 +1797,17 @@
         const container = document.getElementById('modalIngameStats');
         container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">Loading...</div>';
         try {
-          const [statsRes, advRes] = await Promise.all([
+          const [statsRes, advRes, eventsRes] = await Promise.all([
             fetch('/api/player-stats/' + encodeURIComponent(name)),
-            fetch('/api/player-advancements/' + encodeURIComponent(name)).catch(() => null)
+            fetch('/api/player-advancements/' + encodeURIComponent(name)).catch(() => null),
+            fetch('/api/events').catch(() => null)
           ]);
 
           if (!statsRes.ok) { container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">No stats found.</div>'; return; }
           const data = await statsRes.json();
           const advData = advRes && advRes.ok ? await advRes.json() : null;
+          const evData = eventsRes && eventsRes.ok ? await eventsRes.json() : (typeof eventsData !== 'undefined' ? eventsData : null);
+          if (evData && typeof eventsData !== 'undefined' && !eventsData) eventsData = evData;
 
           if (!data.stats) { container.innerHTML = '<div style="text-align:center;color:var(--color-text-faint);">No stats.</div>'; return; }
           
@@ -1806,7 +1840,6 @@
               else if (sN === 'minecraft:player_kills') extracted['player_kills'] = sV;
               else if (sN === 'minecraft:mob_kills') extracted['mob_kills'] = sV;
               else if (sN === 'minecraft:deaths') extracted['deaths'] = sV;
-              else if (sN === 'minecraft:sleep_in_bed') extracted['sleep_in_bed'] = sV;
               else if (sN === 'minecraft:talked_to_villager') extracted['talked_to_villager'] = sV;
               else if (sN === 'minecraft:totem_of_undying') extracted['totem_of_undying'] = sV;
               else if (sN === 'minecraft:silverfish') extracted['silverfish'] = sV;
@@ -1818,6 +1851,24 @@
           if (totalMined > 0) extracted['total_blocks_broken'] = totalMined;
           if (totalUsed > 0) extracted['total_blocks_placed'] = totalUsed;
           if (distCm > 0) extracted['distance_traveled_km'] = Math.floor(distCm / 100000);
+          
+          if (evData && evData.allTimePoints) {
+            let pts = 0;
+            let uuid = null;
+            if (typeof PLAYER_META !== 'undefined' && PLAYER_META[name]) {
+              uuid = PLAYER_META[name].uuid;
+            } else if (evData.uuidToName) {
+              uuid = Object.keys(evData.uuidToName).find(k => evData.uuidToName[k] === name);
+            }
+            if (uuid && evData.allTimePoints[uuid]) {
+              pts = evData.allTimePoints[uuid];
+            } else if (evData.allTimePoints[name]) {
+              pts = evData.allTimePoints[name];
+            }
+            if (pts > 0) {
+              extracted['all_time_event_points'] = pts;
+            }
+          }
           
           // Render In-Game Stats Table
           let h = `<div class="modal-stats-grid">` + STAT_CONFIG.filter(s => !s.id.startsWith('playstyle_')).map(s => { 
@@ -2284,6 +2335,10 @@
           startEventsPolling();
         } else {
           stopEventsPolling();
+        }
+
+        if (activeId === 'tabLeaderboards' && !eventsData) {
+          fetchEvents();
         }
       };
 
