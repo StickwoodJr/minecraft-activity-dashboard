@@ -114,6 +114,7 @@ public class DashboardWebServer {
             httpServer.createContext("/api/player-advancements/", new PlayerAdvancementsHandler(statsAggregator, uuidCache));
             httpServer.createContext("/api/live", new LiveMetricsHandler(this));
             httpServer.createContext("/api/events", new EventsHandler());
+            httpServer.createContext("/respack.zip", new RespackHandler());
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
             httpServer.start();
@@ -745,6 +746,42 @@ public class DashboardWebServer {
             
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(response);
+            }
+        }
+    }
+
+    private static class RespackHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            File gameDir = FabricLoader.getInstance().getGameDir().toFile();
+            File respackZip = new File(gameDir, "dashboard_respack.zip");
+
+            if (!respackZip.exists() || !respackZip.isFile()) {
+                FabricDashboardMod.LOGGER.warn("Client requested respack.zip but it does not exist.");
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+            
+            FabricDashboardMod.LOGGER.info("Serving respack.zip to client: " + exchange.getRemoteAddress() + " (size: " + respackZip.length() + " bytes)");
+
+            exchange.getResponseHeaders().set("Content-Type", "application/zip");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
+            exchange.sendResponseHeaders(200, respackZip.length());
+
+            try (InputStream is = new FileInputStream(respackZip);
+                 OutputStream os = exchange.getResponseBody()) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    os.write(buffer, 0, bytesRead);
+                }
             }
         }
     }

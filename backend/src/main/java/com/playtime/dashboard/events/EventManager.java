@@ -86,6 +86,17 @@ public class EventManager {
         // Take snapshot of initial stats for all known players
         takeStatsSnapshot();
         save();
+        
+        List<String> onlineNames = server.getPlayerManager().getPlayerList().stream()
+            .map(p -> p.getGameProfile().getName())
+            .collect(Collectors.toList());
+        com.playtime.dashboard.util.PlayerHeadFontManager.registerKnownPlayers(onlineNames);
+        
+        new Thread(() -> {
+            com.playtime.dashboard.util.PlayerHeadFontManager.buildRespack();
+            com.playtime.dashboard.util.PlayerHeadFontManager.zipRespack();
+        }, "Dashboard-Respack-Builder").start();
+
         updateScoreboard();
         
         server.getPlayerManager().broadcast(Text.literal("§6[Event] §aNew event started: §l" + title), false);
@@ -307,18 +318,29 @@ public class EventManager {
                 ScoreHolder holder = ScoreHolder.fromName(name);
                 var score = scoreboard.getOrCreateScore(holder, finalObjective);
                 
+                String glyph = com.playtime.dashboard.util.PlayerHeadFontManager.getHeadGlyph(name);
+                net.minecraft.text.MutableText text = Text.empty();
+                if (!glyph.isEmpty()) {
+                    text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
+                }
+                text.append(Text.literal(" §f" + name));
+
                 if (activeEvent.type.equals("playtime")) {
                     String formattedTime = formatTime(val);
-                    score.setDisplayText(Text.literal("§f" + name + " §e" + formattedTime));
+                    text.append(Text.literal(" §e" + formattedTime));
+                    score.setDisplayText(text);
                     // Try to hide the score number if the class exists, otherwise it just shows alongside
                     try {
                         score.setNumberFormat(BlankNumberFormat.INSTANCE);
                     } catch (Throwable ignored) {}
                 } else {
-                    score.setDisplayText(null); // Reset to default
+                    score.setDisplayText(text);
                     score.setNumberFormat(null);
                 }
                 
+                // Debug logging
+                FabricDashboardMod.LOGGER.debug("Scoreboard update for {}: glyph='{}', val={}", name, glyph, val);
+
                 score.setScore(val);
             });
     }

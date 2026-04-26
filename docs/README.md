@@ -45,6 +45,7 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 ### 🎖️ Server Events & Competitions
 *   **Admin-Driven Events**: Create timed competitions (e.g., "Most Hours This Week" or "Most Mob Kills") using `/dashboard event create`.
 *   **Live Scoreboards**: Progress is tracked in real-time on a premium in-game sidebar, featuring formatted time displays (`Dd Hh Mm Ss`) for playtime and hidden raw scores for a clean look.
+*   **Player Head Rendering**: The mod automatically generates a dynamic resource pack mapping player face PNGs to custom Unicode characters. This allows the in-game event scoreboard to render player head icons natively, right beside their names!
 *   **Web Leaderboard**: A dedicated "Events" tab on the dashboard provides a live, interactive view of the competition for players outside the game.
 *   **Automatic Rewards**: At the end of each event, players earn "All-Time Points" based on their placement, which are tracked on a permanent server-wide leaderboard.
 ## Getting Started
@@ -96,6 +97,7 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. |
 | `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. |
 | `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. |
+| `resource_pack_url` | `"http://<ip>:8105/respack.zip"` | The URL where clients download the dynamically generated custom font resource pack. Automatically synced to `server.properties`. |
 | `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. |
 | `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. |
 
