@@ -35,6 +35,7 @@ public class DashboardConfig {
     public String dynmap_url = "http://149.56.155.7:8032";
     public boolean enable_live_tab = true;
     public int live_update_interval_seconds = 3;
+    public String resource_pack_url = "http://149.56.155.7:8105/respack.zip"; // Sets resource-pack in server.properties if not empty
 
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static DashboardConfig instance;
