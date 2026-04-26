@@ -812,9 +812,10 @@
         <div class="card">
           <div style="display:flex; gap:var(--space-4); margin-bottom: var(--space-6);">
             <div class="custom-select" id="statSelectContainer" style="flex:1; margin-bottom: 0;">
-              <div class="select-trigger" onclick="toggleStatDropdown()">
-                <span id="selectedStatLabel">Distance Traveled</span>
-                <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              <div class="select-trigger" style="padding: 0; overflow: hidden; display: flex; align-items: center;" onclick="document.getElementById('statSearchInput').focus()">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--color-text-faint)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left: var(--space-5); flex-shrink: 0;"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+                <input type="text" id="statSearchInput" placeholder="Search leaderboards..." autocomplete="off" oninput="filterStatOptions()" onfocus="openStatDropdown()" style="width: 100%; height: 100%; padding: calc(var(--space-3) + 2px) var(--space-4); border: none; background: transparent; color: var(--color-text); font-size: var(--text-base); font-weight: 600; outline: none; cursor: text;">
+                <svg class="select-arrow" style="margin-right: var(--space-5); flex-shrink: 0; cursor: pointer;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" onclick="toggleStatDropdown(event)"><path d="m6 9 6 6 6-6"/></svg>
               </div>
               <div class="select-options" id="statOptions">
                 <!-- Options dynamic -->
@@ -1500,8 +1501,41 @@
         } catch (e) { document.getElementById('leaderboardBigBody').innerHTML = '<tr><td colspan="3" style="text-align:center;">Failed to load.</td></tr>'; }
       }
 
-      function toggleStatDropdown() {
-        document.getElementById('statSelectContainer').classList.toggle('active');
+      function toggleStatDropdown(e) {
+        if (e) { e.stopPropagation(); e.preventDefault(); }
+        const container = document.getElementById('statSelectContainer');
+        container.classList.toggle('active');
+        const searchInput = document.getElementById('statSearchInput');
+        if (container.classList.contains('active')) {
+          searchInput.focus();
+          searchInput.value = '';
+          filterStatOptions();
+        } else {
+          const selectedConf = STAT_CONFIG.find(s => s.id === selectedStatId);
+          if (selectedConf && searchInput) searchInput.value = selectedConf.name;
+        }
+      }
+
+      function openStatDropdown() {
+        const container = document.getElementById('statSelectContainer');
+        if (!container.classList.contains('active')) {
+          container.classList.add('active');
+          const searchInput = document.getElementById('statSearchInput');
+          searchInput.value = '';
+          filterStatOptions();
+        }
+      }
+
+      function filterStatOptions() {
+        const query = document.getElementById('statSearchInput').value.toLowerCase();
+        const options = document.querySelectorAll('#statOptions .select-option');
+        options.forEach(opt => {
+          if (opt.textContent.toLowerCase().includes(query)) {
+            opt.style.display = 'block';
+          } else {
+            opt.style.display = 'none';
+          }
+        });
       }
 
       // Close dropdown when clicking outside
@@ -1509,15 +1543,26 @@
         const containers = ['statSelectContainer', 'orderSelectContainer', 'playerSortContainer'];
         containers.forEach(id => {
           const el = document.getElementById(id);
-          if (el && !el.contains(e.target)) el.classList.remove('active');
+          if (el && !el.contains(e.target)) {
+            el.classList.remove('active');
+            if (id === 'statSelectContainer') {
+              const searchInput = document.getElementById('statSearchInput');
+              const selectedConf = STAT_CONFIG.find(s => s.id === selectedStatId);
+              if (selectedConf && searchInput) searchInput.value = selectedConf.name;
+            }
+          }
         });
       });
 
       function renderStatOptions() {
         const container = document.getElementById('statOptions');
-        const selectedLabel = document.getElementById('selectedStatLabel');
+        const searchInput = document.getElementById('statSearchInput');
         const selectedConf = STAT_CONFIG.find(s => s.id === selectedStatId);
-        if (selectedConf) selectedLabel.textContent = selectedConf.name;
+        
+        const statSelectContainer = document.getElementById('statSelectContainer');
+        if (selectedConf && searchInput && (!statSelectContainer || !statSelectContainer.classList.contains('active'))) {
+          searchInput.value = selectedConf.name;
+        }
 
         container.innerHTML = STAT_CONFIG.map(s => `
           <div class="select-option ${s.id === selectedStatId ? 'selected' : ''}" 
