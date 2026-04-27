@@ -837,43 +837,32 @@
         </div>
       </div>
       </div> <!-- end viewPlaytime -->
-
       <div id="viewEvents" style="display:none; flex-direction:column; gap:var(--space-6);">
-        <p class="page-sub" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">Compete with other players in time-limited server events!</p>
-        
-        <div id="activeEventCard" class="card" style="display:none; border-color: var(--color-primary); background: oklch(from var(--color-primary) 0.12 0.03 h);">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: var(--space-4);">
-            <div>
-              <div style="font-size: var(--text-xs); color: var(--color-primary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">Active Event</div>
-              <h2 id="eventTitle" style="font-size: var(--text-lg); font-weight: 700; margin-bottom: 4px;">Loading...</h2>
-              <div id="eventGoal" style="font-size: var(--text-sm); color: var(--color-text-muted);"></div>
-            </div>
-            <div style="text-align: right;">
-              <div style="font-size: var(--text-xs); color: var(--color-text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">Time Remaining</div>
-              <div id="eventTimer" style="font-size: var(--text-lg); font-weight: 700; color: var(--color-primary);">--:--:--</div>
-            </div>
-          </div>
-          
+        <p class="page-sub" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">Compete for all-time points and event glory!</p>
+
+        <div id="activeEventsContainer" style="display:contents;"></div>
+
+        <div id="noActiveEvent" class="card" style="display:none; text-align:center; padding: var(--space-12) 0; color: var(--color-text-faint);">
+          <svg style="margin-bottom: var(--space-4); color: var(--color-divider);" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          <div style="font-size: var(--text-base); font-weight: 600;">No active events.</div>
+          <div style="font-size: var(--text-sm);">Check back later or ask an admin to start one!</div>
+        </div>
+
+        <div class="card" id="allTimePointsCard">
+          <div class="card-title">All-Time Event Points <span class="card-subtitle">Lifetime contribution</span></div>
           <div class="table-container">
             <table class="player-table">
               <thead>
                 <tr>
                   <th style="width: 80px;">Rank</th>
                   <th>Player</th>
-                  <th style="text-align: right;" id="eventStatHeader">Score</th>
+                  <th style="text-align: right;">Points</th>
                 </tr>
               </thead>
-              <tbody id="eventLeaderboardBody"></tbody>
+              <tbody id="allTimePointsBody"></tbody>
             </table>
           </div>
         </div>
-
-        <div id="noActiveEvent" class="card" style="text-align:center; padding: var(--space-12) 0; color: var(--color-text-faint);">
-          <svg style="margin-bottom: var(--space-4); color: var(--color-divider);" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-          <div style="font-size: var(--text-base); font-weight: 600;">No active event.</div>
-          <div style="font-size: var(--text-sm);">Check back later or ask an admin to start one!</div>
-        </div>
-
       </div> <!-- end viewEvents -->
 
       <div id="viewLeaderboards" style="display:none; flex-direction:column; gap:var(--space-6);">
@@ -1082,6 +1071,7 @@
       const rankClass = ['rank-1', 'rank-2', 'rank-3'];
       const STAT_CONFIG = [
         { id: 'all_time_event_points', name: 'All-Time Event Points', label: 'Event Points', suffix: '' },
+        { id: 'daily_streak', name: 'Daily Playtime Streak', label: 'Streak', suffix: ' days' },
         { id: 'distance_traveled_km', name: 'Total Distance Traveled', label: 'Distance Traveled', suffix: ' km' },
         { id: 'total_blocks_placed', name: 'Total Blocks Placed', label: 'Blocks Placed', suffix: '' },
         { id: 'total_blocks_broken', name: 'Total Blocks Broken', label: 'Blocks Broken', suffix: '' },
@@ -1675,7 +1665,25 @@
         const body = document.getElementById('leaderboardBigBody');
         if (!leaderboardsData || !leaderboardsData.general) { body.innerHTML = '<tr><td colspan="3" style="text-align:center;">No data.</td></tr>'; return; }
         const statConf = STAT_CONFIG.find(s => s.id === selectedStatId);
-        const playersWithStats = leaderboardsData.general[selectedStatId] || {};
+        let playersWithStats = leaderboardsData.general[selectedStatId] || {};
+        
+        // Special case: daily_streak data comes from events API
+        if (selectedStatId === 'daily_streak' && eventsData && eventsData.streaks) {
+          playersWithStats = {};
+          for (const [key, val] of Object.entries(eventsData.streaks)) {
+            const name = getPlayerNameByUuid(key);
+            playersWithStats[name] = val.streakCount;
+          }
+        }
+        
+        // Special case: all_time_event_points data comes from events API
+        if (selectedStatId === 'all_time_event_points' && eventsData && eventsData.allTimePoints) {
+          playersWithStats = {};
+          for (const [key, val] of Object.entries(eventsData.allTimePoints)) {
+            const name = getPlayerNameByUuid(key);
+            playersWithStats[name] = val;
+          }
+        }
         
         // Update header
         const head = document.getElementById('lb-value-head');
@@ -1822,8 +1830,15 @@
         const peakH = hourlyAcc.indexOf(Math.max(...hourlyAcc));
         let peakHFmt = Math.max(...hourlyAcc) > 0 ? (peakH % 12 || 12) + (peakH < 12 ? 'am' : 'pm') : '-';
         
+        let currentStreak = 0;
+        if (eventsData && eventsData.streaks) {
+          const streakData = eventsData.streaks[name] || (PLAYER_META[name] && eventsData.streaks[PLAYER_META[name].uuid]);
+          if (streakData) currentStreak = streakData.streakCount;
+        }
+
         const stats = [
           { label: 'Total Playtime', value: fmtHours(totalMinutes/60), icon: '', action: "jumpToPlayerTable('total')" },
+          { label: 'Current Streak', value: currentStreak + ' days', icon: '', action: "openLeaderboard('daily_streak')" },
           { label: 'Sessions', value: sd.sessions || '0', icon: '', action: "jumpToPlayerTable('sessions')" },
           { label: 'Avg Session', value: (sd.avg || 0) < 60 ? Math.round(sd.avg || 0)+'m' : ((sd.avg || 0)/60).toFixed(1)+'h', icon: '', action: "jumpToPlayerTable('avg')" },
           { label: 'Longest Session', value: sd.longestSession ? (sd.longestSession < 60 ? Math.round(sd.longestSession)+'m' : (sd.longestSession/60).toFixed(1)+'h') : '-', icon: '', action: `jumpToHeatmapDate('${sd.longestSessionDate || ''}')` },
@@ -1915,6 +1930,10 @@
               else if (sN === 'minecraft:wither') extracted['wither'] = sV;
               else if (sN === 'minecraft:ender_dragon') extracted['ender_dragon'] = sV;
             }
+          }
+
+          if (evData && evData.streaks && (evData.streaks[name] || evData.streaks[PLAYER_META[name]?.uuid])) {
+            extracted['daily_streak'] = (evData.streaks[name] || evData.streaks[PLAYER_META[name]?.uuid]).streakCount;
           }
 
           if (totalMined > 0) extracted['total_blocks_broken'] = totalMined;
@@ -2309,7 +2328,7 @@
           const cleanSessData = {};
           for (let p in data.sessData) {
             const n = normalize(p);
-            if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+            if (n && !ignoredPlayers.includes(n.toLowerCase())) {
               if (!cleanSessData[n]) {
                 cleanSessData[n] = { ...data.sessData[p] };
               } else {
@@ -2362,6 +2381,7 @@
           initSearch();
 
           console.log("[Playtime] Load complete.");
+          fetchEvents(); // Initial fetch for events/streaks
           startLivePolling(); // Start polling for header widget
           hideOverlay();
         } catch (e) { 
@@ -2435,83 +2455,170 @@
         eventsPollTimer = null;
       }
 
-      let eventsData = null;
-
-      function renderEvents(data) {
+           function renderEvents(data) {
         eventsData = data;
-        const active = data.activeEvent;
+        const activeEvents = data.activeEvents || [];
         const allTime = data.allTimePoints || {};
 
-        const activeCard = document.getElementById('activeEventCard');
+        const container = document.getElementById('activeEventsContainer');
         const noActive = document.getElementById('noActiveEvent');
 
-        if (active && active.isActive) {
-          activeCard.style.display = 'block';
+        if (activeEvents.length > 0) {
           noActive.style.display = 'none';
-          document.getElementById('eventTitle').textContent = active.title;
-          
-          const typeLabels = {
-            'playtime': 'Playtime (Minutes)',
-            'blocks_placed': 'Blocks Placed',
-            'blocks_mined': 'Blocks Mined',
-            'mob_kills': 'Mob Kills'
-          };
-          document.getElementById('eventGoal').textContent = `Goal: ${typeLabels[active.type] || active.type}`;
-          document.getElementById('eventStatHeader').textContent = typeLabels[active.type] || 'Score';
+          container.innerHTML = activeEvents.map(active => {
+            const typeLabels = {
+              'playtime': 'Playtime (Minutes)',
+              'blocks_placed': 'Blocks Placed',
+              'blocks_mined': 'Blocks Mined',
+              'mob_kills': 'Mob Kills',
+              'fewest_deaths': 'Fewest Deaths',
+              'damage_dealt': 'Damage Dealt (Hearts)',
+              'player_kills': 'Player Kills',
+              'fish_caught': 'Fish Caught'
+            };
 
-          // Timer
-          const updateTimer = () => {
-            const now = Date.now();
-            const diff = active.endTime - now;
-            if (diff <= 0) {
-              document.getElementById('eventTimer').textContent = "00:00:00";
-              return;
-            }
-            const h = Math.floor(diff / 3600000);
-            const m = Math.floor((diff % 3600000) / 60000);
-            const s = Math.floor((diff % 60000) / 1000);
-            document.getElementById('eventTimer').textContent = 
-              `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-          };
-          updateTimer();
+            const groupedScores = {};
+            const allKnownNamesLive = new Map();
+            Object.entries(eventsData?.uuidToName || {}).forEach(([u, n]) => {
+                if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+                    allKnownNamesLive.set(n, { val: 0, uuid: u });
+                }
+            });
+            Object.entries(PLAYER_META || {}).forEach(([n, meta]) => {
+                if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+                    if (!allKnownNamesLive.has(n)) {
+                        allKnownNamesLive.set(n, { val: 0, uuid: meta.uuid });
+                    }
+                }
+            });
 
-          // Leaderboard
-          const lbBody = document.getElementById('eventLeaderboardBody');
-          const scores = Object.entries(active.currentScores || {})
-            .sort((a,b) => b[1] - a[1]);
-          
-          if (scores.length === 0) {
-            lbBody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 2rem; color: var(--color-text-faint);">No scores yet. Get started!</td></tr>';
-          } else {
-            lbBody.innerHTML = scores.map(([uuid, val], i) => {
-              let scoreDisplay = val.toLocaleString();
-              if (active.type === 'playtime') {
-                const d = Math.floor(val / 86400);
-                const h = Math.floor((val % 86400) / 3600);
-                const m = Math.floor((val % 3600) / 60);
-                const s = val % 60;
-                scoreDisplay = (d > 0 ? d + 'd ' : '') + 
-                               (h > 0 || d > 0 ? h + 'h ' : '') + 
-                               (m > 0 || h > 0 || d > 0 ? m + 'm ' : '') + 
-                               s + 's';
+            Object.entries(active.currentScores || {}).forEach(([uuid, val]) => {
+              const name = getPlayerNameByUuid(uuid);
+              if (name && !isUUID(name) && !ignoredPlayers.includes(name.toLowerCase())) {
+                if (allKnownNamesLive.has(name)) {
+                    allKnownNamesLive.get(name).val = val;
+                } else {
+                    allKnownNamesLive.set(name, { val: val, uuid: uuid });
+                }
               }
-              return `
-                <tr onclick="showPlayerDetails('${getPlayerNameByUuid(uuid)}')">
-                  <td><span class="rank-badge ${i < 3 ? rankClass[i] : ''}">${i + 1}</span></td>
-                  <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${getPlayerNameByUuid(uuid)}</span></div></td>
-                  <td style="text-align: right; font-weight: 700;">${scoreDisplay}</td>
-                </tr>
-              `;
-            }).join('');
-          }
+            });
+
+            allKnownNamesLive.forEach((data, name) => {
+                groupedScores[name] = data;
+            });
+
+            const scores = Object.entries(groupedScores)
+              .map(([name, data]) => [name, data.val, data.uuid])
+              .sort((a,b) => active.lowerIsBetter ? a[1] - b[1] : b[1] - a[1]);
+
+            let lbHtml = '<tr><td colspan="3" style="text-align:center; padding: 2rem; color: var(--color-text-faint);">No scores yet. Get started!</td></tr>';
+            if (scores.length > 0) {
+              lbHtml = scores.map(([name, val, uuid], i) => {
+                let scoreDisplay = val.toLocaleString();
+                if (active.type === 'playtime') {
+                  const s = val;
+                  const d = Math.floor(s / 86400);
+                  const h = Math.floor((s % 86400) / 3600);
+                  const m = Math.floor((s % 3600) / 60);
+                  const sec = s % 60;
+                  scoreDisplay = (d > 0 ? d + 'd ' : '') + (h > 0 || d > 0 ? h + 'h ' : '') + (m > 0 || h > 0 || d > 0 ? m + 'm ' : '') + sec + 's';
+                } else if (active.type === 'damage_dealt') {
+                  scoreDisplay = val + ' ❤';
+                }
+                return `
+                  <tr onclick="showPlayerDetails('${name}')">
+                    <td><span class="rank-badge ${i < 3 ? rankClass[i] : ''}">${i + 1}</span></td>
+                    <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${name}</span></div></td>
+                    <td style="text-align: right; font-weight: 700;">${scoreDisplay}</td>
+                  </tr>
+                `;
+              }).join('');
+            }
+
+            return `
+              <div class="card event-card" id="event-${active.id}" style="border-color: var(--color-primary); background: oklch(from var(--color-primary) 0.12 0.03 h); margin-bottom: var(--space-6);">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: var(--space-4);">
+                  <div>
+                    <div style="font-size: var(--text-xs); color: var(--color-primary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">Active Event</div>
+                    <h2 style="font-size: var(--text-lg); font-weight: 700; margin-bottom: 4px;">${active.title}</h2>
+                    <div style="font-size: var(--text-sm); color: var(--color-text-muted);">Goal: ${typeLabels[active.type] || active.type}</div>
+                  </div>
+                  <div style="text-align: right;">
+                    <div style="font-size: var(--text-xs); color: var(--color-text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">Time Remaining</div>
+                    <div class="event-timer" data-end="${active.endTime}" style="font-size: var(--text-lg); font-weight: 700; color: var(--color-primary);">--:--:--</div>
+                  </div>
+                </div>
+                
+                <div class="table-container">
+                  <table class="player-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 80px;">Rank</th>
+                        <th>Player</th>
+                        <th style="text-align: right;">${typeLabels[active.type] || 'Score'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>${lbHtml}</tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          // Start timers
+          if (window.eventTimerInterval) clearInterval(window.eventTimerInterval);
+          const updateTimers = () => {
+            document.querySelectorAll('.event-timer').forEach(el => {
+              const endTime = parseInt(el.dataset.end);
+              const diff = endTime - Date.now();
+              if (diff <= 0) { el.textContent = "00:00:00"; return; }
+              const h = Math.floor(diff / 3600000);
+              const m = Math.floor((diff % 3600000) / 60000);
+              const s = Math.floor((diff % 60000) / 1000);
+              el.textContent = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            });
+          };
+          updateTimers();
+          window.eventTimerInterval = setInterval(updateTimers, 1000);
+
         } else {
-          activeCard.style.display = 'none';
+          container.innerHTML = '';
           noActive.style.display = 'block';
         }
 
         // All-Time
         const allTimeBody = document.getElementById('allTimePointsBody');
-        const sortedAllTime = Object.entries(allTime).sort((a,b) => b[1] - a[1]);
+        
+        const allKnownNames = new Map(); // name -> { pts, uuid }
+        
+        Object.entries(eventsData?.uuidToName || {}).forEach(([u, n]) => {
+            if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+                allKnownNames.set(n, { pts: 0, uuid: u });
+            }
+        });
+        Object.entries(PLAYER_META || {}).forEach(([n, meta]) => {
+            if (n && !isUUID(n) && !ignoredPlayers.includes(n.toLowerCase())) {
+                if (!allKnownNames.has(n)) {
+                    allKnownNames.set(n, { pts: 0, uuid: meta.uuid });
+                }
+            }
+        });
+        
+        Object.entries(allTime).forEach(([uuidOrName, pts]) => {
+            const name = getPlayerNameByUuid(uuidOrName);
+            if (name && !isUUID(name) && !ignoredPlayers.includes(name.toLowerCase())) {
+                if (allKnownNames.has(name)) {
+                    allKnownNames.get(name).pts += pts;
+                } else {
+                    allKnownNames.set(name, { pts: pts, uuid: uuidOrName });
+                }
+            }
+        });
+
+        const sortedAllTime = Array.from(allKnownNames.entries())
+          .sort((a,b) => b[1].pts - a[1].pts)
+          .map(([name, data]) => [data.uuid || name, data.pts]);
+
         if (sortedAllTime.length === 0) {
           allTimeBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No points awarded yet.</td></tr>';
         } else {

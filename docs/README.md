@@ -44,11 +44,19 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
 
 ### 🎖️ Server Events & Competitions
-*   **Admin-Driven Events**: Create timed competitions (e.g., "Most Hours This Week" or "Most Mob Kills") using `/dashboard event create`.
-*   **Live Scoreboards**: Progress is tracked in real-time on a premium in-game sidebar, featuring formatted time displays (`Dd Hh Mm Ss`) for playtime and hidden raw scores for a clean look.
-*   **Player Head Rendering**: The mod automatically generates a dynamic resource pack mapping player face PNGs to custom Unicode characters. This allows the in-game event scoreboard to render player head icons natively, right beside their names!
-*   **Web Leaderboard**: A dedicated "Events" tab on the dashboard provides a live, interactive view of the competition for players outside the game.
-*   **Automatic Rewards**: At the end of each event, players earn "All-Time Points" based on their placement, which are tracked on a permanent server-wide leaderboard.
+*   **Multiple Concurrent Events**: Run multiple competitions simultaneously (e.g., "Mega Mining Mayhem" and "Playtime Challenge").
+*   **Admin-Driven Events**: Create timed competitions using `/dashboard event create`. Supported types: `playtime`, `mob_kills`, `blocks_placed`, `blocks_mined`, `fewest_deaths`, `damage_dealt`, `player_kills`, `fish_caught`, and `daily_streak`.
+*   **Live Scoreboards**: Progress is tracked in real-time on a premium in-game sidebar. Each player can choose which event to track via `/dashboard event scoreboard`.
+*   **Inverted Leaderboards**: Support for `fewest_deaths` where the lowest score wins, correctly sorted on the Minecraft sidebar.
+*   **Player Head Rendering**: Native rendering of player heads on the sidebar using a dynamic resource pack.
+*   **Web Leaderboard**: A dedicated "Events" tab on the dashboard with individual cards for each active event, live timers, and interactive leaderboards.
+*   **Automatic Rewards**: Earn "All-Time Points" for top placements, tracked on a permanent server-wide leaderboard.
+
+### 🔥 Daily Playtime Streaks
+*   **Activity Milestones**: Automatically tracks players who reach 60 minutes of playtime in a calendar day.
+*   **Log-Derived Persistence**: Streaks are calculated from historical activity logs, ensuring consistency even after server restarts.
+*   **Visual Recognition**: Current streaks are displayed in player profiles and have their own dedicated "Daily Playtime Streak" leaderboard.
+
 ## Getting Started
 
 ### Prerequisites
@@ -71,15 +79,19 @@ Once built, drop the resulting `.jar` file from `backend/build/libs/` into your 
 By default, the dashboard is accessible at `http://<your-server-ip>:8105`.
 
 ## Server Commands
-All commands require Operator level 2 permission.
 
-| Command | Description |
-| :--- | :--- |
-| `/dashboard event create <type> <hours> <title>` | Start a new timed event (playtime, mob_kills, blocks_placed, blocks_mined). |
-| `/dashboard event stop` | Manually end the current event and distribute points. |
-| `/dashboard event status` | View details and remaining time for the active event. |
-| `/dashboard event clearpoints all [amount]` | Clear or reduce all-time points for all players. |
-| `/dashboard event clearpoints user <name> [amount]` | Clear or reduce all-time points for a specific player. |
+| Command | Description | Permission |
+| :--- | :--- | :--- |
+| `/dashboard event create <type> <hours> <title>` | Start a new timed event. | OP (2) |
+| `/dashboard event stop [id]` | Stop a specific event (or the latest if no ID provided). | OP (2) |
+| `/dashboard event list` | List all active events and their IDs. | All |
+| `/dashboard event status [id]` | View details and remaining time for an event. | All |
+| `/dashboard event setlength <id> <hours>` | Update the duration of an active event. | OP (2) |
+| `/dashboard event scoreboard <id>` | Switch your personal sidebar to track a specific event. | All |
+| `/dashboard event clearpoints all [amount]` | Clear or reduce all-time points for all players. | OP (2) |
+| `/dashboard event clearpoints user <name> [amount]` | Clear or reduce all-time points for a specific player. | OP (2) |
+| `/dashboard reparse` | Force a full re-parse of all server logs to refresh activity data. | OP (2) |
+| `/dashboard reload` | Reload the mod configuration. | OP (2) |
 
 ## Configuration
 Settings are managed via `config/dashboard-config.json`. The file is automatically generated on first run.
@@ -93,12 +105,14 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `dashboard_title` | `"Activity Dashboard"` | The main heading on the dashboard. |
 | `custom_logo_path` | `""` | Path to a local `.jpg` or `.png` for the dashboard logo. |
 | `enable_dynmap` | `true` | Toggle the Dynmap tab on/off. |
-| `dynmap_url` | `"http://149.56.155.7:8032"` | The URL of your Dynmap instance. |
-| `ignored_players` | `["ironfarmbot", ...]` | List of player names to exclude from all stats. |
+| `dynmap_url` | `""` | The URL of your Dynmap instance. |
+| `ignored_players` | `[]` | List of player names to exclude from all stats. |
+| `max_concurrent_events` | `3` | Maximum number of events that can run at once. |
+| `streak_timezone` | `"America/Toronto"` | Timezone used for daily streak calculation. |
 | `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. |
 | `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. |
 | `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. |
-| `resource_pack_url` | `"http://<ip>:8105/respack.zip"` | The URL where clients download the dynamically generated custom font resource pack. Automatically synced to `server.properties`. |
+| `resource_pack_url` | `""` | The URL where clients download the custom font resource pack. |
 | `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. |
 | `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. |
 

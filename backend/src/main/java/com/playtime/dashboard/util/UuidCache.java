@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.playtime.dashboard.FabricDashboardMod;
 import net.fabricmc.loader.api.FabricLoader;
 
@@ -22,6 +23,15 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 
 public class UuidCache {
+    private static UuidCache instance;
+
+    public static UuidCache getInstance() {
+        if (instance == null) {
+            instance = new UuidCache();
+        }
+        return instance;
+    }
+
     private volatile Map<String, UUID> nameToUuid = new HashMap<>();
     private volatile Map<UUID, String> uuidToName = new HashMap<>();
     private final Map<UUID, String> networkResolved = new ConcurrentHashMap<>();
@@ -32,7 +42,8 @@ public class UuidCache {
     public void refresh() {
         Map<String, UUID> newNameToUuid = new HashMap<>();
         Map<UUID, String> newUuidToName = new HashMap<>();
-        File cacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "usercache.json");
+        File gameDir = FabricLoader.getInstance().getGameDir().toFile();
+        File cacheFile = new File(gameDir, "usercache.json");
 
         if (cacheFile.exists()) {
             try (FileReader reader = new FileReader(cacheFile)) {
@@ -50,6 +61,42 @@ public class UuidCache {
                 }
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to read usercache.json", e);
+            }
+        }
+
+        // Also load from dashboard_faces/meta.json to catch players seen by web UI
+        File metaFile = new File(new File(gameDir, "dashboard_faces"), "meta.json");
+        if (metaFile.exists()) {
+            try (FileReader reader = new FileReader(metaFile)) {
+                JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
+                int metaCount = 0;
+                for (Map.Entry<String, JsonElement> entry : data.entrySet()) {
+                    String name = entry.getKey();
+                    if (entry.getValue().isJsonObject()) {
+                        JsonObject meta = entry.getValue().getAsJsonObject();
+                        if (meta.has("uuid")) {
+                            String uuidStr = meta.get("uuid").getAsString();
+                            if (uuidStr != null && !uuidStr.isEmpty()) {
+                                try {
+                                    String dashed = uuidStr;
+                                    if (dashed.length() == 32) {
+                                        dashed = dashed.substring(0, 8) + "-" + dashed.substring(8, 12) + "-" + dashed.substring(12, 16) + "-" + dashed.substring(16, 20) + "-" + dashed.substring(20);
+                                    }
+                                    UUID uuid = UUID.fromString(dashed);
+                                    if (!newUuidToName.containsKey(uuid)) {
+                                        newUuidToName.put(uuid, name);
+                                        newNameToUuid.put(name.toLowerCase(), uuid);
+                                        metaCount++;
+                                    }
+                                } catch (Exception e) {
+                                    FabricDashboardMod.LOGGER.warn("UuidCache: Failed to parse UUID '{}' for player '{}'", uuidStr, name);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.error("Failed to read dashboard_faces/meta.json in UuidCache", e);
             }
         }
 
@@ -129,5 +176,13 @@ public class UuidCache {
 
         networkFailed.add(uuid);
         return Optional.empty();
+    }
+
+    public java.util.Set<String> getAllKnownUuids() {
+        java.util.Set<String> uuids = new java.util.HashSet<>();
+        for (UUID u : uuidToName.keySet()) uuids.add(u.toString());
+        for (UUID u : networkResolved.keySet()) uuids.add(u.toString());
+        for (UUID u : nameToUuid.values()) uuids.add(u.toString());
+        return uuids;
     }
 }
