@@ -36,6 +36,9 @@ public class DashboardConfig {
     public boolean enable_live_tab = true;
     public int live_update_interval_seconds = 3;
     public String resource_pack_url = "http://149.56.155.7:8105/respack.zip"; // Sets resource-pack in server.properties if not empty
+    public int max_concurrent_events = 3;
+    public String streak_timezone = "America/Toronto";
+    public boolean allow_pvp_events = true;
 
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static DashboardConfig instance;

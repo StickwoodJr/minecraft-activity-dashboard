@@ -34,6 +34,8 @@ import java.util.concurrent.TimeUnit;
  * then re-runs an incremental parse on a configurable interval.
  */
 public class DashboardWebServer {
+    private static volatile DashboardWebServer instance;
+
     private final MinecraftServer minecraftServer;
     private HttpServer httpServer;
     private final LogParser parser;
@@ -96,7 +98,12 @@ public class DashboardWebServer {
         this.headService = new PlayerHeadService(FabricLoader.getInstance().getGameDir().toFile());
         this.leaderboardCacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_leaderboards.json");
         this.statsAggregator = new StatsAggregator();
-        this.uuidCache = new UuidCache();
+        this.uuidCache = UuidCache.getInstance();
+        instance = this;
+    }
+
+    public static DashboardWebServer getInstance() {
+        return instance;
     }
 
     public void start() {
@@ -187,6 +194,41 @@ public class DashboardWebServer {
         } catch (IOException e) {
             FabricDashboardMod.LOGGER.error("Failed to start Dashboard Web Server", e);
         }
+    }
+
+    public void reparseLogs() {
+        scheduler.execute(() -> {
+            File logsDir = resolveLogsDir();
+            FabricDashboardMod.LOGGER.info("[Dashboard] Manual reparse requested. Logs directory: " + logsDir.getAbsolutePath() + ", cache file: " + cacheFile.getAbsolutePath());
+            try {
+                parser.runHistoricalParse(logsDir, cacheFile);
+                FabricDashboardMod.LOGGER.info("[Dashboard] Manual reparse complete. Cache days: " + countCachedDays() + ", cache file: " + cacheFile.getAbsolutePath());
+                triggerHeadFetches();
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.error("[Dashboard] Manual reparse failed", e);
+            }
+        });
+    }
+
+    private File resolveLogsDir() {
+        String customLogsDir = DashboardConfig.get().logs_directory;
+        if (customLogsDir != null && !customLogsDir.trim().isEmpty()) {
+            return new File(customLogsDir);
+        }
+        return new File(FabricLoader.getInstance().getGameDir().toFile(), "logs");
+    }
+
+    private int countCachedDays() {
+        if (!cacheFile.exists()) return 0;
+        try (Reader reader = new FileReader(cacheFile)) {
+            JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
+            if (data.has("daily") && data.get("daily").isJsonObject()) {
+                return data.getAsJsonObject("daily").size();
+            }
+        } catch (Exception e) {
+            FabricDashboardMod.LOGGER.warn("[Dashboard] Failed to count cached days after reparse", e);
+        }
+        return 0;
     }
 
     private void updateLiveMetrics() {

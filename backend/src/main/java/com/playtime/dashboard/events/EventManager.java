@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.reflect.TypeToken;
 import com.playtime.dashboard.FabricDashboardMod;
 import com.playtime.dashboard.config.DashboardConfig;
 import net.fabricmc.loader.api.FabricLoader;
@@ -11,12 +12,14 @@ import net.minecraft.block.Block;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.scoreboard.*;
+import net.minecraft.scoreboard.number.BlankNumberFormat;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.stat.StatType;
 import net.minecraft.stat.Stats;
 import net.minecraft.text.Text;
-import net.minecraft.scoreboard.number.*;
+import net.minecraft.network.packet.s2c.play.ScoreboardDisplayS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScoreboardScoreUpdateS2CPacket;
 import net.minecraft.util.Identifier;
 
 import java.io.File;
@@ -33,8 +36,10 @@ public class EventManager {
     private final File eventsFile;
     private MinecraftServer server;
     
-    private ServerEvent activeEvent;
+    private List<ServerEvent> activeEvents = new ArrayList<>();
+    private Map<String, String> playerPreferences = new HashMap<>(); // UUID -> eventId
     private Map<String, Integer> allTimePoints = new HashMap<>();
+    private Map<String, Set<UUID>> syncedObjectives = new HashMap<>(); // objName -> set of player UUIDs
 
     private EventManager() {
         this.eventsFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_events.json");
@@ -50,11 +55,16 @@ public class EventManager {
 
     public void init(MinecraftServer server) {
         this.server = server;
+        com.playtime.dashboard.util.UuidCache.getInstance().refresh();
         updateScoreboard();
     }
 
+    public List<ServerEvent> getActiveEvents() {
+        return activeEvents;
+    }
+
     public ServerEvent getActiveEvent() {
-        return activeEvent;
+        return activeEvents.isEmpty() ? null : activeEvents.get(0);
     }
 
     public Map<String, Integer> getAllTimePoints() {
@@ -70,12 +80,17 @@ public class EventManager {
     }
 
     public void startEvent(String title, String type, int durationHours) {
-        if (activeEvent != null) {
-            stopEvent();
+        if (activeEvents.size() >= DashboardConfig.get().max_concurrent_events) {
+            server.getPlayerManager().broadcast(Text.literal("§c[Event] Cannot start event: Max concurrent events reached (" + DashboardConfig.get().max_concurrent_events + ")"), false);
+            return;
+        }
+        if (isActiveTitleInUse(title)) {
+            server.getPlayerManager().broadcast(Text.literal("§c[Event] Cannot start event: An active event already uses that title."), false);
+            return;
         }
 
         long now = System.currentTimeMillis();
-        activeEvent = new ServerEvent(
+        ServerEvent event = new ServerEvent(
             UUID.randomUUID().toString(),
             title,
             type,
@@ -83,8 +98,12 @@ public class EventManager {
             now + (long) durationHours * 60 * 60 * 1000
         );
 
-        // Take snapshot of initial stats for all known players
-        takeStatsSnapshot();
+        if (type.equals("fewest_deaths")) {
+            event.lowerIsBetter = true;
+        }
+
+        activeEvents.add(event);
+        takeStatsSnapshot(event);
         save();
         
         List<String> onlineNames = server.getPlayerManager().getPlayerList().stream()
@@ -103,134 +122,186 @@ public class EventManager {
         server.getPlayerManager().broadcast(Text.literal("§6[Event] §eGoal: " + type.replace("_", " ") + " for " + durationHours + " hours!"), false);
     }
 
-    public void stopEvent() {
-        if (activeEvent == null) return;
+    public boolean isActiveTitleInUse(String title) {
+        if (title == null) return false;
+        String normalized = title.trim();
+        return activeEvents.stream().anyMatch(e -> e.title != null && e.title.trim().equalsIgnoreCase(normalized));
+    }
 
-        updateScores(); // Final update
-        distributePoints();
+    public ServerEvent findActiveEventByInput(String input) {
+        if (input == null) return null;
+        String normalized = input.trim();
+        if (normalized.isEmpty()) return null;
+
+        ServerEvent byTitle = activeEvents.stream()
+            .filter(e -> e.title != null && e.title.trim().equalsIgnoreCase(normalized))
+            .findFirst()
+            .orElse(null);
+        if (byTitle != null) return byTitle;
+
+        ServerEvent byExactId = activeEvents.stream()
+            .filter(e -> e.id.equals(normalized))
+            .findFirst()
+            .orElse(null);
+        if (byExactId != null) return byExactId;
+
+        return activeEvents.stream()
+            .filter(e -> e.id.startsWith(normalized))
+            .findFirst()
+            .orElse(null);
+    }
+
+    public void stopEvent() {
+        if (!activeEvents.isEmpty()) {
+            stopEvent(activeEvents.get(0).id);
+        }
+    }
+
+    public void stopEvent(String eventId) {
+        ServerEvent eventToStop = activeEvents.stream().filter(e -> e.id.equals(eventId)).findFirst().orElse(null);
+        if (eventToStop == null) return;
+
+        updateScores(eventToStop);
+        distributePoints(eventToStop);
         
-        server.getPlayerManager().broadcast(Text.literal("§6[Event] §cEvent ended: §l" + activeEvent.title), false);
+        server.getPlayerManager().broadcast(Text.literal("§6[Event] §cEvent ended: §l" + eventToStop.title), false);
+        activeEvents.remove(eventToStop);
         
-        // Remove scoreboard objective
         Scoreboard scoreboard = server.getScoreboard();
-        ScoreboardObjective objective = scoreboard.getNullableObjective("event_lb");
+        ScoreboardObjective objective = scoreboard.getNullableObjective(getObjectiveName(eventToStop.id));
         if (objective != null) {
             scoreboard.removeObjective(objective);
         }
 
-        activeEvent = null;
         save();
+        updateScoreboard();
     }
 
-    private void takeStatsSnapshot() {
+    private void takeStatsSnapshot(ServerEvent event) {
+        com.playtime.dashboard.util.UuidCache.getInstance().refresh();
         Path statsDir = getStatsPath();
-        
-        // 1. Snapshot disk stats
         File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
+        Set<String> snapshotTaken = new HashSet<>();
         if (files != null) {
             for (File statFile : files) {
                 String uuidStr = statFile.getName().replace(".json", "");
-                int value = getStatValueFromDisk(statFile, activeEvent.type);
-                activeEvent.initialStats.put(uuidStr, value);
+                event.initialStats.put(uuidStr, getStatValueFromDisk(statFile, event.type));
+                snapshotTaken.add(uuidStr);
             }
         }
-
-        // 2. Overwrite with live stats for online players (more accurate)
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             String uuidStr = player.getUuid().toString();
-            activeEvent.initialStats.put(uuidStr, getStatValueFromPlayer(player, activeEvent.type));
+            event.initialStats.put(uuidStr, getStatValueFromPlayer(player, event.type));
+            snapshotTaken.add(uuidStr);
+        }
+        
+        Set<String> allKnown = com.playtime.dashboard.util.UuidCache.getInstance().getAllKnownUuids();
+        for (String u : allKnown) {
+            if (!snapshotTaken.contains(u)) {
+                event.initialStats.put(u, 0);
+            }
         }
     }
 
     private Path getStatsPath() {
-        return FabricLoader.getInstance().getGameDir()
-                .resolve(DashboardConfig.get().stats_world_name)
-                .resolve("stats");
+        return server.getRunDirectory().resolve("world/stats");
     }
 
     public void tick() {
-        if (activeEvent == null) return;
-
-        if (System.currentTimeMillis() > activeEvent.endTime) {
-            stopEvent();
-            return;
+        if (activeEvents.isEmpty()) return;
+        com.playtime.dashboard.util.UuidCache.getInstance().refresh();
+        List<String> toStop = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (ServerEvent event : activeEvents) {
+            if (now > event.endTime) toStop.add(event.id);
+            else updateScores(event);
         }
-
-        updateScores();
-    }
-
-    private void updateScores() {
-        if (activeEvent == null) return;
-
-        // 1. Update from disk (Offline players and baseline)
-        Path statsDir = getStatsPath();
-        File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
-        if (files != null) {
-            for (File statFile : files) {
-                String uuidStr = statFile.getName().replace(".json", "");
-                int currentValue = getStatValueFromDisk(statFile, activeEvent.type);
-                updatePlayerScore(uuidStr, currentValue);
-            }
-        }
-
-        // 2. Update from online players (Override disk with live data)
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            String uuidStr = player.getUuid().toString();
-            int currentValue = getStatValueFromPlayer(player, activeEvent.type);
-            updatePlayerScore(uuidStr, currentValue);
-        }
-        
+        for (String id : toStop) stopEvent(id);
         updateScoreboard();
     }
 
-    private void updatePlayerScore(String uuidStr, int currentValue) {
-        if (!activeEvent.initialStats.containsKey(uuidStr)) {
-            activeEvent.initialStats.put(uuidStr, currentValue);
+    private void updateScores(ServerEvent event) {
+        com.playtime.dashboard.util.UuidCache.getInstance().refresh();
+        Path statsDir = getStatsPath();
+        File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
+        Set<String> updated = new HashSet<>();
+        if (files != null) {
+            for (File statFile : files) {
+                String uuidStr = statFile.getName().replace(".json", "");
+                updatePlayerScore(event, uuidStr, getStatValueFromDisk(statFile, event.type));
+                updated.add(uuidStr);
+            }
+        }
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            String uuidStr = player.getUuid().toString();
+            updatePlayerScore(event, uuidStr, getStatValueFromPlayer(player, event.type));
+            updated.add(uuidStr);
         }
         
-        int initialValue = activeEvent.initialStats.get(uuidStr);
-        int score = currentValue - initialValue;
-        
-        // Convert playtime ticks to seconds for better readability
-        if (activeEvent.type.equals("playtime")) {
-            score = score / 20;
+        Set<String> allKnown = com.playtime.dashboard.util.UuidCache.getInstance().getAllKnownUuids();
+        for (String u : allKnown) {
+            if (!updated.contains(u)) {
+                updatePlayerScore(event, u, 0);
+            }
+        }
+    }
+
+    private void updatePlayerScore(ServerEvent event, String uuidStr, int currentValue) {
+        String name = getPlayerName(uuidStr);
+        List<String> ignored = DashboardConfig.get().ignored_players.stream().map(String::toLowerCase).collect(Collectors.toList());
+        if (ignored.contains(name.toLowerCase())) {
+            event.currentScores.remove(uuidStr);
+            return;
         }
         
-        if (score > 0) {
-            activeEvent.currentScores.put(uuidStr, score);
+        // Also check if the UUID matches the offline UUID of an ignored player
+        for (String ignoredName : DashboardConfig.get().ignored_players) {
+            String offlineUuid = java.util.UUID.nameUUIDFromBytes(("OfflinePlayer:" + ignoredName).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+            if (uuidStr.equals(offlineUuid)) {
+                event.currentScores.remove(uuidStr);
+                return;
+            }
         }
+
+        if (!event.initialStats.containsKey(uuidStr)) event.initialStats.put(uuidStr, currentValue);
+        int score = currentValue - event.initialStats.get(uuidStr);
+        
+        if (event.type.equals("playtime")) score /= 20;
+        else if (event.type.equals("damage_dealt")) score /= 10;
+        else if (event.type.equals("daily_streak")) score = currentValue;
+        
+        if (score >= 0 || event.lowerIsBetter) event.currentScores.put(uuidStr, score);
     }
 
     private int getStatValueFromPlayer(ServerPlayerEntity player, String type) {
         switch (type) {
-            case "playtime":
-                // Try both play_time and play_one_minute identifiers
-                int pt = player.getStatHandler().getStat(Stats.CUSTOM, Registries.CUSTOM_STAT.get(Identifier.of("minecraft", "play_time")));
-                if (pt == 0) pt = player.getStatHandler().getStat(Stats.CUSTOM, Registries.CUSTOM_STAT.get(Identifier.of("minecraft", "play_one_minute")));
-                return pt;
-            case "mob_kills":
-                return player.getStatHandler().getStat(Stats.CUSTOM, Registries.CUSTOM_STAT.get(Identifier.of("minecraft", "mob_kills")));
-            case "blocks_placed":
-                return sumCategoryFromPlayer(player, Stats.USED, Registries.ITEM, true);
-            case "blocks_mined":
-                return sumCategoryFromPlayer(player, Stats.MINED, Registries.BLOCK, false);
-            default:
-                return 0;
+            case "playtime": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.PLAY_TIME);
+            case "mob_kills": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.MOB_KILLS);
+            case "fewest_deaths": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.DEATHS);
+            case "damage_dealt": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.DAMAGE_DEALT);
+            case "player_kills": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.PLAYER_KILLS);
+            case "fish_caught":
+                int vFish = player.getStatHandler().getStat(Stats.CUSTOM, Stats.FISH_CAUGHT);
+                return vFish + (FabricLoader.getInstance().isModLoaded("tide") ? sumTideFromPlayer(player) : 0);
+            case "daily_streak": return StreakTracker.getInstance().getStreak(player.getUuid().toString());
+            case "blocks_placed": return sumCategoryPlayer(player, Stats.USED, true);
+            case "blocks_mined": return sumCategoryPlayer(player, Stats.MINED, false);
+            default: return 0;
         }
     }
 
-    private <T> int sumCategoryFromPlayer(ServerPlayerEntity player, StatType<T> category, net.minecraft.registry.Registry<T> registry, boolean checkBlocks) {
+    private int sumCategoryPlayer(ServerPlayerEntity player, StatType<?> type, boolean blocksOnly) {
         int sum = 0;
-        for (T entry : registry) {
-            int value = player.getStatHandler().getStat(category, entry);
-            if (value > 0) {
-                if (checkBlocks) {
-                    if (isBlockHeuristic(registry.getId(entry).toString())) {
-                        sum += value;
-                    }
-                } else {
-                    sum += value;
-                }
+        if (type == Stats.USED) {
+            StatType<Item> itemType = (StatType<Item>) type;
+            for (Item item : itemType.getRegistry()) {
+                if (blocksOnly && !Registries.ITEM.getId(item).toString().contains(":")) continue; // basic filter
+                sum += player.getStatHandler().getStat(itemType, item);
+            }
+        } else if (type == Stats.MINED) {
+            StatType<Block> blockType = (StatType<Block>) type;
+            for (Block block : blockType.getRegistry()) {
+                sum += player.getStatHandler().getStat(blockType, block);
             }
         }
         return sum;
@@ -238,212 +309,253 @@ public class EventManager {
 
     private int getStatValueFromDisk(File statFile, String type) {
         try (FileReader reader = new FileReader(statFile)) {
-            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-            if (!root.has("stats")) return 0;
-            JsonObject stats = root.getAsJsonObject("stats");
-
+            JsonObject stats = JsonParser.parseReader(reader).getAsJsonObject().getAsJsonObject("stats");
+            if (stats == null) return 0;
             switch (type) {
-                case "playtime":
-                    int pt = getNestedInt(stats, "minecraft:custom", "minecraft:play_time");
-                    if (pt == 0) pt = getNestedInt(stats, "minecraft:custom", "minecraft:play_one_minute");
-                    return pt;
-                case "mob_kills":
-                    return getNestedInt(stats, "minecraft:custom", "minecraft:mob_kills");
-                case "blocks_placed":
-                    return sumCategory(stats, "minecraft:used", true); // heuristic: used blocks
-                case "blocks_mined":
-                    return sumCategory(stats, "minecraft:mined", false);
-                default:
-                    return 0;
+                case "playtime": return getNestedInt(stats, "minecraft:custom", "minecraft:play_time");
+                case "mob_kills": return getNestedInt(stats, "minecraft:custom", "minecraft:mob_kills");
+                case "fewest_deaths": return getNestedInt(stats, "minecraft:custom", "minecraft:deaths");
+                case "damage_dealt": return getNestedInt(stats, "minecraft:custom", "minecraft:damage_dealt");
+                case "player_kills": return getNestedInt(stats, "minecraft:custom", "minecraft:player_kills");
+                case "fish_caught":
+                    int vFish = getNestedInt(stats, "minecraft:custom", "minecraft:fish_caught");
+                    return vFish + (FabricLoader.getInstance().isModLoaded("tide") ? sumTideFromDisk(stats) : 0);
+                case "daily_streak": return StreakTracker.getInstance().getStreak(statFile.getName().replace(".json", ""));
+                case "blocks_placed": return sumCategory(stats, "minecraft:used", true);
+                case "blocks_mined": return sumCategory(stats, "minecraft:mined", false);
+                default: return 0;
             }
-        } catch (Exception e) {
-            return 0;
-        }
+        } catch (Exception e) { return 0; }
     }
 
     private int getNestedInt(JsonObject stats, String category, String stat) {
         if (stats.has(category)) {
-            JsonObject catObj = stats.getAsJsonObject(category);
-            if (catObj.has(stat)) {
-                return catObj.get(stat).getAsInt();
-            }
+            JsonObject cat = stats.getAsJsonObject(category);
+            if (cat.has(stat)) return cat.get(stat).getAsInt();
         }
         return 0;
     }
 
-    private int sumCategory(JsonObject stats, String category, boolean checkBlocks) {
+    private int sumCategory(JsonObject stats, String category, boolean blocksOnly) {
         if (!stats.has(category)) return 0;
-        JsonObject catObj = stats.getAsJsonObject(category);
+        JsonObject cat = stats.getAsJsonObject(category);
         int sum = 0;
-        for (String key : catObj.keySet()) {
-            // Basic heuristic for blocks: doesn't end with common item suffixes
-            if (checkBlocks) {
-                if (isBlockHeuristic(key)) sum += catObj.get(key).getAsInt();
-            } else {
-                sum += catObj.get(key).getAsInt();
+        for (String id : cat.keySet()) {
+            if (blocksOnly && !id.contains(":")) continue;
+            sum += cat.get(id).getAsInt();
+        }
+        return sum;
+    }
+
+    private int sumTideFromPlayer(ServerPlayerEntity player) {
+        int sum = 0;
+        for (Item item : Registries.ITEM) {
+            if (Registries.ITEM.getId(item).getNamespace().equals("tide")) {
+                sum += player.getStatHandler().getStat(Stats.USED, item);
             }
         }
         return sum;
     }
 
-    private boolean isBlockHeuristic(String key) {
-        String k = key.replace("minecraft:", "");
-        return !k.endsWith("_sword") && !k.endsWith("_pickaxe") && !k.endsWith("_axe") && 
-               !k.endsWith("_shovel") && !k.endsWith("_hoe") && !k.endsWith("_helmet") &&
-               !k.endsWith("_chestplate") && !k.endsWith("_leggings") && !k.endsWith("_boots") &&
-               !k.equals("apple") && !k.equals("bread") && !k.equals("stick");
+    private int sumTideFromDisk(JsonObject stats) {
+        if (!stats.has("minecraft:used")) return 0;
+        JsonObject used = stats.getAsJsonObject("minecraft:used");
+        int sum = 0;
+        for (String id : used.keySet()) {
+            if (id.startsWith("tide:")) sum += used.get(id).getAsInt();
+        }
+        return sum;
     }
 
-    private void updateScoreboard() {
-        if (server == null || activeEvent == null) return;
+    public void onPlayerJoin(ServerPlayerEntity player) {
+        UUID uuid = player.getUuid();
+        syncedObjectives.values().forEach(set -> set.remove(uuid));
+    }
 
+    public void onPlayerLeave(ServerPlayerEntity player) {
+        UUID uuid = player.getUuid();
+        syncedObjectives.values().forEach(set -> set.remove(uuid));
+    }
+
+    public void updateScoreboard() {
+        if (server == null) return;
         Scoreboard scoreboard = server.getScoreboard();
-        ScoreboardObjective objective = scoreboard.getNullableObjective("event_lb");
-        
-        if (objective == null) {
-            objective = scoreboard.addObjective("event_lb", ScoreboardCriterion.DUMMY, 
-                Text.literal("§6§l" + activeEvent.title), ScoreboardCriterion.RenderType.INTEGER, false, null);
-            scoreboard.setObjectiveSlot(ScoreboardDisplaySlot.SIDEBAR, objective);
+
+        if (activeEvents.isEmpty()) {
+            for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+                player.networkHandler.sendPacket(new ScoreboardDisplayS2CPacket(ScoreboardDisplaySlot.SIDEBAR, null));
+            }
+            return;
         }
 
-        final ScoreboardObjective finalObjective = objective;
-        activeEvent.currentScores.entrySet().stream()
-            .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-            .limit(15)
-            .forEach(entry -> {
-                String uuidStr = entry.getKey();
-                int val = entry.getValue();
-                String name = getPlayerName(uuidStr);
-                
-                ScoreHolder holder = ScoreHolder.fromName(name);
-                var score = scoreboard.getOrCreateScore(holder, finalObjective);
-                
-                String glyph = com.playtime.dashboard.util.PlayerHeadFontManager.getHeadGlyph(name);
-                net.minecraft.text.MutableText text = Text.empty();
-                if (!glyph.isEmpty()) {
-                    text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
-                }
-                text.append(Text.literal(" §f" + name));
+        for (ServerEvent event : activeEvents) {
+            String objName = getObjectiveName(event.id);
+            if (scoreboard.getNullableObjective(objName) == null) {
+                scoreboard.addObjective(objName, ScoreboardCriterion.DUMMY, Text.literal("§6§l" + event.title), ScoreboardCriterion.RenderType.INTEGER, false, null);
+            }
+            updateObjectiveContent(event, scoreboard.getNullableObjective(objName));
+        }
 
-                if (activeEvent.type.equals("playtime")) {
-                    String formattedTime = formatTime(val);
-                    text.append(Text.literal(" §e" + formattedTime));
-                    score.setDisplayText(text);
-                    // Try to hide the score number if the class exists, otherwise it just shows alongside
-                    try {
-                        score.setNumberFormat(BlankNumberFormat.INSTANCE);
-                    } catch (Throwable ignored) {}
-                } else {
-                    score.setDisplayText(text);
-                    score.setNumberFormat(null);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            String uuidStr = player.getUuid().toString();
+            String prefId = playerPreferences.get(uuidStr);
+            ServerEvent displayEvent = activeEvents.stream().filter(e -> e.id.equals(prefId)).findFirst()
+                    .orElse(activeEvents.get(0));
+
+            ScoreboardObjective obj = scoreboard.getNullableObjective(getObjectiveName(displayEvent.id));
+            if (obj != null) {
+                // Ensure client knows about this specific objective
+                Set<UUID> synced = syncedObjectives.computeIfAbsent(obj.getName(), k -> new HashSet<>());
+                if (!synced.contains(player.getUuid())) {
+                    player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.ScoreboardObjectiveUpdateS2CPacket(obj, 0));
+                    synced.add(player.getUuid());
+                }
+
+                // Force sidebar display
+                player.networkHandler.sendPacket(new ScoreboardDisplayS2CPacket(ScoreboardDisplaySlot.SIDEBAR, obj));
+                
+                int count = 0;
+                Map<String, Integer> scores = displayEvent.currentScores;
+                
+                for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+                    String name = getPlayerName(entry.getKey());
+                    int val = entry.getValue();
+                    int internalScore = displayEvent.lowerIsBetter ? Integer.MAX_VALUE - val : val;
+                    
+                    net.minecraft.text.MutableText text = Text.empty();
+                    String glyph = com.playtime.dashboard.util.PlayerHeadFontManager.getHeadGlyph(name);
+                    if (!glyph.isEmpty()) {
+                        text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
+                    }
+                    text.append(Text.literal(" §f" + name + " §e" + (displayEvent.type.equals("playtime") ? formatTime(val) : (displayEvent.type.equals("damage_dealt") ? val + " ❤" : val))));
+
+                    player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
+                        name, 
+                        obj.getName(), 
+                        internalScore, 
+                        Optional.of(text), 
+                        Optional.of(BlankNumberFormat.INSTANCE)
+                    ));
+                    count++;
                 }
                 
-                // Debug logging
-                FabricDashboardMod.LOGGER.debug("Scoreboard update for {}: glyph='{}', val={}", name, glyph, val);
-
-                score.setScore(val);
-            });
+                FabricDashboardMod.LOGGER.info("[Scoreboard] Sent {} scores to {} for event {}", count, player.getGameProfile().getName(), displayEvent.title);
+            }
+        }
     }
 
+    private void updateObjectiveContent(ServerEvent event, ScoreboardObjective objective) {
+        Scoreboard scoreboard = server.getScoreboard();
+        event.currentScores.forEach((uuid, val) -> {
+            String name = getPlayerName(uuid);
+            ScoreHolder holder = ScoreHolder.fromName(name);
+            var score = scoreboard.getOrCreateScore(holder, objective);
+            
+            net.minecraft.text.MutableText text = Text.empty();
+            String glyph = com.playtime.dashboard.util.PlayerHeadFontManager.getHeadGlyph(name);
+            if (!glyph.isEmpty()) {
+                text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
+            }
+            text.append(Text.literal(" §f" + name + " §e" + (event.type.equals("playtime") ? formatTime(val) : (event.type.equals("damage_dealt") ? val + " ❤" : val))));
+            
+            score.setDisplayText(text);
+            score.setNumberFormat(BlankNumberFormat.INSTANCE);
+            score.setScore(event.lowerIsBetter ? Integer.MAX_VALUE - val : val);
+        });
+    }
+
+    private String getObjectiveName(String eventId) { return "ev_" + eventId.substring(0, Math.min(8, eventId.length())); }
+
     private String formatTime(int seconds) {
-        int d = seconds / 86400;
-        int h = (seconds % 86400) / 3600;
-        int m = (seconds % 3600) / 60;
-        int s = seconds % 60;
-        
-        StringBuilder sb = new StringBuilder();
-        if (d > 0) sb.append(d).append("d ");
-        if (h > 0 || d > 0) sb.append(h).append("h ");
-        if (m > 0 || h > 0 || d > 0) sb.append(m).append("m ");
-        sb.append(s).append("s");
-        return sb.toString();
+        int d = seconds / 86400, h = (seconds % 86400) / 3600, m = (seconds % 3600) / 60, s = seconds % 60;
+        return (d > 0 ? d + "d " : "") + (h > 0 || d > 0 ? h + "h " : "") + (m > 0 || h > 0 || d > 0 ? m + "m " : "") + s + "s";
+    }
+
+    public void setPlayerScoreboardPreference(UUID uuid, String eventId) {
+        playerPreferences.put(uuid.toString(), eventId);
+        save();
+        updateScoreboard();
     }
 
     public void clearAllPoints(int amount) {
-        if (amount <= 0) {
-            allTimePoints.clear();
-        } else {
-            allTimePoints.replaceAll((uuid, points) -> Math.max(0, points - amount));
-        }
+        if (amount <= 0) allTimePoints.clear();
+        else allTimePoints.replaceAll((u, p) -> Math.max(0, p - amount));
         save();
     }
 
     public void clearUserPoints(String playerOrUuid, int amount) {
         String uuidStr = playerOrUuid;
-        // Try to find UUID if it's a name
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             if (player.getGameProfile().getName().equalsIgnoreCase(playerOrUuid)) {
                 uuidStr = player.getUuid().toString();
                 break;
             }
         }
-        
-        if (amount <= 0) {
-            allTimePoints.remove(uuidStr);
-        } else {
-            allTimePoints.computeIfPresent(uuidStr, (k, v) -> Math.max(0, v - amount));
-        }
+        if (amount <= 0) allTimePoints.remove(uuidStr);
+        else allTimePoints.computeIfPresent(uuidStr, (k, v) -> Math.max(0, v - amount));
         save();
     }
 
     private String getPlayerName(String uuidStr) {
+        String name = uuidStr;
         try {
             UUID uuid = UUID.fromString(uuidStr);
             ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
-            if (player != null) return player.getGameProfile().getName();
-            
-            // Fallback to usercache
-            return server.getUserCache().getByUuid(uuid).map(p -> p.getName()).orElse(uuidStr);
-        } catch (Exception e) {
-            return uuidStr;
+            if (player != null) {
+                name = player.getGameProfile().getName();
+            } else {
+                name = server.getUserCache().getByUuid(uuid).map(p -> p.getName()).orElseGet(() -> 
+                    com.playtime.dashboard.util.UuidCache.getInstance().getUsername(uuid).orElse(uuidStr)
+                );
+            }
+        } catch (Exception e) { /* ignored */ }
+
+        // Apply Aliases
+        Map<String, String> aliases = DashboardConfig.get().player_aliases;
+        if (aliases != null) {
+            if (aliases.containsKey(uuidStr)) return aliases.get(uuidStr).trim();
+            if (aliases.containsKey(name)) return aliases.get(name).trim();
+            if (aliases.containsKey(name.toLowerCase())) return aliases.get(name.toLowerCase()).trim();
         }
-    }
 
-    private void distributePoints() {
-        if (activeEvent == null) return;
-
-        List<Map.Entry<String, Integer>> sorted = activeEvent.currentScores.entrySet().stream()
-            .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-            .collect(Collectors.toList());
-
-        for (int i = 0; i < sorted.size(); i++) {
-            String uuid = sorted.get(i).getKey();
-            int points = 10; // Participation
-            if (i == 0) points = 100;
-            else if (i == 1) points = 50;
-            else if (i == 2) points = 25;
-
-            allTimePoints.merge(uuid, points, Integer::sum);
+        // Hardcoded grouping
+        if (name.equalsIgnoreCase("hanger") || name.equalsIgnoreCase("advent")) {
+            return "Advent/Hanger";
         }
-        save();
+
+        return name;
     }
 
     private void load() {
         if (!eventsFile.exists()) return;
         try (FileReader reader = new FileReader(eventsFile)) {
             JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
-            if (data.has("activeEvent")) {
-                activeEvent = GSON.fromJson(data.get("activeEvent"), ServerEvent.class);
-            }
-            if (data.has("allTimePoints")) {
-                java.lang.reflect.Type type = new com.google.gson.reflect.TypeToken<Map<String, Integer>>(){}.getType();
-                allTimePoints = GSON.fromJson(data.get("allTimePoints"), type);
-            }
-        } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed to load events data", e);
-        }
+            if (data.has("activeEvents")) activeEvents = GSON.fromJson(data.get("activeEvents"), new TypeToken<List<ServerEvent>>(){}.getType());
+            if (data.has("playerPreferences")) playerPreferences = GSON.fromJson(data.get("playerPreferences"), new TypeToken<Map<String, String>>(){}.getType());
+            if (data.has("allTimePoints")) allTimePoints = GSON.fromJson(data.get("allTimePoints"), new TypeToken<Map<String, Integer>>(){}.getType());
+        } catch (Exception e) { FabricDashboardMod.LOGGER.error("Failed to load events data", e); }
     }
 
     public void save() {
         try (FileWriter writer = new FileWriter(eventsFile)) {
             JsonObject data = new JsonObject();
-            if (activeEvent != null) {
-                data.add("activeEvent", GSON.toJsonTree(activeEvent));
-            }
+            data.add("activeEvents", GSON.toJsonTree(activeEvents));
+            data.add("playerPreferences", GSON.toJsonTree(playerPreferences));
             data.add("allTimePoints", GSON.toJsonTree(allTimePoints));
             GSON.toJson(data, writer);
-        } catch (IOException e) {
-            FabricDashboardMod.LOGGER.error("Failed to save events data", e);
+        } catch (IOException e) { FabricDashboardMod.LOGGER.error("Failed to save events data", e); }
+    }
+
+    private boolean isUUID(String s) { return s != null && s.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"); }
+
+    private void distributePoints(ServerEvent event) {
+        List<Map.Entry<String, Integer>> sorted = event.currentScores.entrySet().stream()
+            .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
+            .sorted(event.lowerIsBetter ? Map.Entry.comparingByValue() : Map.Entry.<String, Integer>comparingByValue().reversed())
+            .collect(Collectors.toList());
+        for (int i = 0; i < Math.min(sorted.size(), 3); i++) {
+            allTimePoints.merge(sorted.get(i).getKey(), 3 - i, Integer::sum);
         }
+        save();
     }
 }

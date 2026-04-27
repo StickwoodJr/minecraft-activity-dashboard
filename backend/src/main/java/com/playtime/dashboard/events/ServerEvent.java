@@ -14,6 +14,7 @@ public class ServerEvent {
     public long startTime;
     public long endTime;
     public boolean isActive;
+    public boolean lowerIsBetter = false;
 
     // Map of UUID string to the value of the stat when the event started
     public Map<String, Integer> initialStats = new HashMap<>();

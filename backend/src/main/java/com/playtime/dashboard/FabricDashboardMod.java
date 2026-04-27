@@ -3,11 +3,13 @@ package com.playtime.dashboard;
 import com.playtime.dashboard.commands.DashboardCommand;
 import com.playtime.dashboard.config.DashboardConfig;
 import com.playtime.dashboard.events.EventManager;
+import com.playtime.dashboard.events.StreakTracker;
 import com.playtime.dashboard.web.DashboardWebServer;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +31,16 @@ public class FabricDashboardMod implements ModInitializer {
             DashboardCommand.register(dispatcher);
         });
 
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            StreakTracker.getInstance().onPlayerJoin(handler.player);
+            EventManager.getInstance().onPlayerJoin(handler.player);
+        });
+
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            StreakTracker.getInstance().onPlayerLeave(handler.player);
+            EventManager.getInstance().onPlayerLeave(handler.player);
+        });
+
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             DashboardConfig.load();
             EventManager.getInstance().init(server);
@@ -40,6 +52,7 @@ public class FabricDashboardMod implements ModInitializer {
             tickCounter++;
             if (tickCounter >= 200) { // Every 10 seconds
                 EventManager.getInstance().tick();
+                StreakTracker.getInstance().tick(server);
                 tickCounter = 0;
             }
         });
