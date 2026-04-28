@@ -11,6 +11,8 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public class DashboardCommand {
     public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
@@ -23,6 +25,8 @@ public class DashboardCommand {
                             builder.suggest("playtime");
                             builder.suggest("blocks_placed");
                             builder.suggest("blocks_mined");
+                            builder.suggest("obsidian_placed");
+                            builder.suggest("obsidian_mined");
                             builder.suggest("mob_kills");
                             builder.suggest("fewest_deaths");
                             builder.suggest("damage_dealt");
@@ -56,16 +60,7 @@ public class DashboardCommand {
                 )
                 .then(CommandManager.literal("list")
                     .executes(context -> {
-                        List<ServerEvent> active = EventManager.getInstance().getActiveEvents();
-                        if (active.isEmpty()) {
-                            context.getSource().sendFeedback(() -> Text.literal("§eNo active events."), false);
-                        } else {
-                            context.getSource().sendFeedback(() -> Text.literal("§6--- Active Events ---"), false);
-                            for (ServerEvent event : active) {
-                                long remaining = (event.endTime - System.currentTimeMillis()) / 1000;
-                                context.getSource().sendFeedback(() -> Text.literal("§e" + event.title + " §7(" + event.id.substring(0, 8) + ") - " + event.type + " §f[" + (remaining / 3600) + "h " + ((remaining % 3600) / 60) + "m left]"), false);
-                            }
-                        }
+                        sendEventOverview(context.getSource());
                         return 1;
                     })
                 )
@@ -122,18 +117,25 @@ public class DashboardCommand {
                 )
                 .then(CommandManager.literal("status")
                     .executes(context -> {
-                        List<ServerEvent> active = EventManager.getInstance().getActiveEvents();
-                        if (active.isEmpty()) {
-                            context.getSource().sendFeedback(() -> Text.literal("§eNo active events."), false);
-                        } else {
-                            context.getSource().sendFeedback(() -> Text.literal("§6--- Active Events ---"), false);
-                            for (ServerEvent event : active) {
-                                long remaining = (event.endTime - System.currentTimeMillis()) / 1000;
-                                context.getSource().sendFeedback(() -> Text.literal("§e" + event.title + " §7(" + event.id.substring(0, 8) + ") - " + event.type + " §f[" + (remaining / 3600) + "h " + ((remaining % 3600) / 60) + "m left]"), false);
-                            }
-                        }
+                        sendEventOverview(context.getSource());
                         return 1;
                     })
+                    .then(CommandManager.argument("id", StringArgumentType.string())
+                        .suggests((context, builder) -> {
+                            suggestActiveEventTitles(builder);
+                            return builder.buildFuture();
+                        })
+                        .executes(context -> {
+                            String input = StringArgumentType.getString(context, "id");
+                            ServerEvent event = EventManager.getInstance().findActiveEventByInput(input);
+                            if (event == null) {
+                                context.getSource().sendError(Text.literal("Event not found. Use /dashboard event list to view active events."));
+                                return 0;
+                            }
+                            sendEventDetail(context.getSource(), event);
+                            return 1;
+                        })
+                    )
                 )
                 .then(CommandManager.literal("clearpoints")
                     .requires(source -> source.hasPermissionLevel(2))
@@ -173,6 +175,30 @@ public class DashboardCommand {
                     )
                 )
                 .then(CommandManager.literal("scoreboard")
+                    .then(CommandManager.literal("hide")
+                        .executes(context -> {
+                            net.minecraft.server.network.ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) {
+                                context.getSource().sendError(Text.literal("This command must be run by a player."));
+                                return 0;
+                            }
+                            EventManager.getInstance().setScoreboardHidden(player.getUuid(), true);
+                            context.getSource().sendFeedback(() -> Text.literal("§aEvent scoreboard hidden. Use §f/dashboard event scoreboard show§a to bring it back."), false);
+                            return 1;
+                        })
+                    )
+                    .then(CommandManager.literal("show")
+                        .executes(context -> {
+                            net.minecraft.server.network.ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) {
+                                context.getSource().sendError(Text.literal("This command must be run by a player."));
+                                return 0;
+                            }
+                            EventManager.getInstance().setScoreboardHidden(player.getUuid(), false);
+                            context.getSource().sendFeedback(() -> Text.literal("§aEvent scoreboard shown."), false);
+                            return 1;
+                        })
+                    )
                     .then(CommandManager.argument("id", StringArgumentType.string())
                         .suggests((context, builder) -> {
                             suggestActiveEventTitles(builder);
@@ -186,7 +212,14 @@ public class DashboardCommand {
                                 return 0;
                             }
 
-                            EventManager.getInstance().setPlayerScoreboardPreference(context.getSource().getPlayer().getUuid(), event.id);
+                            net.minecraft.server.network.ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) {
+                                context.getSource().sendError(Text.literal("This command must be run by a player."));
+                                return 0;
+                            }
+                            EventManager mgr = EventManager.getInstance();
+                            mgr.setScoreboardHidden(player.getUuid(), false);
+                            mgr.setPlayerScoreboardPreference(player.getUuid(), event.id);
                             context.getSource().sendFeedback(() -> Text.literal("§aScoreboard preference set to: " + eventRef(event)), false);
                             return 1;
                         })
@@ -238,5 +271,88 @@ public class DashboardCommand {
     private static String eventRef(ServerEvent event) {
         String title = event.title == null || event.title.isBlank() ? event.id : event.title;
         return title + " (" + shortId(event.id) + ")";
+    }
+
+    private static void sendEventOverview(ServerCommandSource source) {
+        List<ServerEvent> active = EventManager.getInstance().getActiveEvents();
+        if (active == null || active.isEmpty()) {
+            source.sendMessage(Text.literal("§eNo active events."));
+            return;
+        }
+        source.sendMessage(Text.literal("§6--- Active Events (" + active.size() + ") ---"));
+        for (ServerEvent event : active) {
+            long remainingSec = Math.max(0, (event.endTime - System.currentTimeMillis()) / 1000);
+            String remainingStr = formatDuration(remainingSec);
+            int participants = event.currentScores == null ? 0 : (int) event.currentScores.values().stream().filter(v -> v != null && v > 0).count();
+            source.sendMessage(Text.literal(
+                "§e" + (event.title == null ? event.id : event.title)
+                    + " §7(" + shortId(event.id) + ") "
+                    + "§b" + event.type
+                    + " §f[§a" + remainingStr + " left§f] "
+                    + "§7participants: §f" + participants
+            ));
+        }
+    }
+
+    private static void sendEventDetail(ServerCommandSource source, ServerEvent event) {
+        long now = System.currentTimeMillis();
+        long remainingSec = Math.max(0, (event.endTime - now) / 1000);
+        long elapsedSec = Math.max(0, (now - event.startTime) / 1000);
+        long totalSec = Math.max(1, (event.endTime - event.startTime) / 1000);
+        int pct = (int) Math.min(100, Math.max(0, (elapsedSec * 100) / totalSec));
+
+        source.sendMessage(Text.literal("§6--- Event: §e" + (event.title == null ? event.id : event.title) + " §6---"));
+        source.sendMessage(Text.literal("§7id: §f" + event.id));
+        source.sendMessage(Text.literal("§7type: §b" + event.type + (event.lowerIsBetter ? " §7(lower is better)" : "")));
+        source.sendMessage(Text.literal("§7elapsed: §f" + formatDuration(elapsedSec) + " §7/ §f" + formatDuration(totalSec) + " §7(" + pct + "%)"));
+        source.sendMessage(Text.literal("§7remaining: §a" + formatDuration(remainingSec)));
+
+        if (event.currentScores == null || event.currentScores.isEmpty()) {
+            source.sendMessage(Text.literal("§7No scores recorded yet."));
+            return;
+        }
+
+        List<Map.Entry<String, Integer>> ranked = event.currentScores.entrySet().stream()
+            .filter(e -> e.getValue() != null && e.getValue() > 0)
+            .sorted(event.lowerIsBetter ? Map.Entry.comparingByValue() : Map.Entry.<String, Integer>comparingByValue().reversed())
+            .collect(Collectors.toList());
+
+        if (ranked.isEmpty()) {
+            source.sendMessage(Text.literal("§7No qualifying scores yet."));
+            return;
+        }
+
+        int top = Math.min(10, ranked.size());
+        source.sendMessage(Text.literal("§6Top " + top + ":"));
+        EventManager mgr = EventManager.getInstance();
+        for (int i = 0; i < top; i++) {
+            Map.Entry<String, Integer> entry = ranked.get(i);
+            int rank = i + 1;
+            int val = entry.getValue();
+            String name = mgr.resolvePlayerName(entry.getKey());
+            String scoreStr;
+            if (event.type.equals("playtime")) scoreStr = formatDuration(val);
+            else if (event.type.equals("damage_dealt")) scoreStr = val + " ❤";
+            else scoreStr = String.valueOf(val);
+            String pointsStr = rank <= 3 ? " §6(+" + (4 - rank) + " pts)" : "";
+            source.sendMessage(Text.literal("§e#" + rank + " §f" + name + " §7- §a" + scoreStr + pointsStr));
+        }
+        if (ranked.size() > top) {
+            int remaining = ranked.size() - top;
+            source.sendMessage(Text.literal("§7...and " + remaining + " more."));
+        }
+    }
+
+    private static String formatDuration(long seconds) {
+        long d = seconds / 86400;
+        long h = (seconds % 86400) / 3600;
+        long m = (seconds % 3600) / 60;
+        long s = seconds % 60;
+        StringBuilder sb = new StringBuilder();
+        if (d > 0) sb.append(d).append("d ");
+        if (h > 0 || d > 0) sb.append(h).append("h ");
+        if (m > 0 || h > 0 || d > 0) sb.append(m).append("m ");
+        sb.append(s).append("s");
+        return sb.toString();
     }
 }
