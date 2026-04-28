@@ -461,6 +461,23 @@
       }
       .modal-player-header { display: flex; align-items: center; gap: var(--space-4); }
       .modal-player-name { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.02em; }
+      .modal-player-coords {
+        font-size: var(--text-xs);
+        color: var(--color-primary);
+        font-weight: 600;
+        cursor: pointer;
+        padding: var(--space-1) var(--space-3);
+        border-radius: var(--radius-full);
+        background: var(--color-primary-highlight);
+        border: 1px solid var(--color-primary);
+        transition: all var(--transition);
+        white-space: nowrap;
+        margin-top: var(--space-2);
+      }
+      .modal-player-coords:hover {
+        background: var(--color-primary);
+        color: #fff;
+      }
       .modal-stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); width: 100%; padding-top: 8px; }
       .stat-card {
         background: var(--color-surface-2); border: 1px solid var(--color-divider);
@@ -1013,6 +1030,29 @@
       const ENABLE_LIVE_TAB = "{{ENABLE_LIVE_TAB}}" === "true";
       const LIVE_UPDATE_INTERVAL = parseInt("{{LIVE_UPDATE_INTERVAL_MS}}") || 3000;
       console.log("[Playtime] Config:", { ENABLE_DYNMAP, DYNMAP_URL, ENABLE_LIVE_TAB, LIVE_UPDATE_INTERVAL });
+
+      let dynmapWorldMap = {};
+      let dynmapConfigLoaded = false;
+
+      async function loadDynmapConfig() {
+        if (dynmapConfigLoaded || !ENABLE_DYNMAP || !DYNMAP_URL) return;
+        try {
+          const res = await fetch('/api/dynmap-config');
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const config = await res.json();
+          const map = {};
+          for (const w of (config.worlds || [])) {
+            if (w.title && w.name) map[w.title] = w.name;
+          }
+          dynmapWorldMap = map;
+          dynmapConfigLoaded = true;
+          console.log("[Dynmap] Loaded world map:", map);
+        } catch (e) {
+          console.warn("[Dynmap] Failed to load /api/dynmap-config, falling back to dimension path as worldname:", e);
+        }
+      }
+      loadDynmapConfig();
+
       const statusEl = document.getElementById('loadingStatus');
       const crashEl = document.getElementById('crashMessage');
       const overlayEl = document.getElementById('loadingOverlay');
@@ -1724,7 +1764,68 @@
 
       // --- Modal Logic ---
 
-      function closePlayerModal() { document.getElementById('playerModal').classList.remove('visible'); }
+      function closePlayerModal() {
+        document.getElementById('playerModal').classList.remove('visible');
+        const coordsEl = document.getElementById('modalPlayerCoords');
+        if (coordsEl) coordsEl.remove();
+      }
+
+      function getPlayerLiveData(name) {
+        if (!liveState || !Array.isArray(liveState.players)) return null;
+        return liveState.players.find(p => p.name === name) || null;
+      }
+
+      function buildDynmapUrl(x, z, dimension) {
+        if (!ENABLE_DYNMAP || !DYNMAP_URL) return null;
+        const path = dimension && dimension.includes(':') ? dimension.split(':')[1] : (dimension || 'overworld');
+        const worldName = dynmapWorldMap[path] || path;
+        const baseUrl = DYNMAP_URL.split('?')[0].split('#')[0];
+        return `${baseUrl}?worldname=${encodeURIComponent(worldName)}&mapname=flat&zoom=4&x=${Math.round(x)}&y=64&z=${Math.round(z)}`;
+      }
+
+      function navigateToDynmap(x, z, dimension) {
+        const url = buildDynmapUrl(x, z, dimension);
+        if (!url) return;
+        closePlayerModal();
+        if (ENABLE_DYNMAP) {
+          const frame = document.getElementById('dynmapFrame');
+          if (frame) frame.src = url;
+          updateTabs('tabDynmap');
+        } else {
+          window.open(url, '_blank');
+        }
+      }
+
+      function renderModalCoords(name) {
+        let el = document.getElementById('modalPlayerCoords');
+        const liveData = getPlayerLiveData(name);
+
+        if (!liveData) {
+          if (el) el.remove();
+          return;
+        }
+
+        const dimLabels = {
+          'minecraft:overworld': 'Overworld',
+          'minecraft:the_nether': 'Nether',
+          'minecraft:the_end': 'End',
+          'aether:the_aether': 'Aether'
+        };
+        const dimLabel = dimLabels[liveData.dimension] || liveData.dimension;
+        const coordText = `📍 ${Math.round(liveData.x)}, ${Math.round(liveData.y)}, ${Math.round(liveData.z)} · ${dimLabel}`;
+
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'modalPlayerCoords';
+          el.className = 'modal-player-coords';
+
+          const header = document.querySelector('.modal-player-header');
+          if (header) header.insertAdjacentElement('afterend', el);
+        }
+
+        el.textContent = coordText;
+        el.onclick = () => navigateToDynmap(liveData.x, liveData.z, liveData.dimension);
+      }
 
       function openLeaderboard(statId) {
         closePlayerModal();
@@ -1875,6 +1976,7 @@
           skinViewer.loadSkin(`/skins/${encodeURIComponent(name)}.png`).catch(() => {}); skinViewer.animation.paused = false;
         } catch (e) { skinCanvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-muted);font-size:var(--text-sm);">3D viewer unavailable</div>'; }
         fetchPlayerStats(name);
+        renderModalCoords(name);
       }
 
       async function fetchPlayerStats(name) {
@@ -2663,6 +2765,12 @@
           const data = await res.json();
           liveState = data;
           renderLive();
+          // Refresh coords badge if modal is open
+          const modal = document.getElementById('playerModal');
+          if (modal && modal.classList.contains('visible')) {
+            const playerName = document.getElementById('modalPlayerName').textContent;
+            if (playerName) renderModalCoords(playerName);
+          }
         } catch (e) {
           console.error("[Live] Polling failed:", e);
           document.getElementById('liveLastUpdate').textContent = "Connection error: " + e.message;
