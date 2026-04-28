@@ -133,24 +133,12 @@ public class DashboardWebServer {
 
             // Setup scheduling
             
-            // Run historical parse once if needed, then schedule incremental
+            // Rebuild the activity cache on startup, then schedule incremental updates.
             scheduler.execute(() -> {
-                File logsDir;
-                String customLogsDir = DashboardConfig.get().logs_directory;
-                if (customLogsDir != null && !customLogsDir.trim().isEmpty()) {
-                    logsDir = new File(customLogsDir);
-                } else {
-                    logsDir = new File(FabricLoader.getInstance().getGameDir().toFile(), "logs");
-                }
-
-                FabricDashboardMod.LOGGER.info("Dashboard background task executing using logs directory: " + logsDir.getAbsolutePath());
-
-                if (!cacheFile.exists()) {
-                    FabricDashboardMod.LOGGER.info("Cache file not found at " + cacheFile.getAbsolutePath() + ". Beginning historical parse.");
-                    parser.runHistoricalParse(logsDir, cacheFile);
-                } else {
-                    FabricDashboardMod.LOGGER.info("Found existing cache file at " + cacheFile.getAbsolutePath() + ". Skipping historical parse.");
-                }
+                File logsDir = resolveLogsDir();
+                FabricDashboardMod.LOGGER.info("[Dashboard] Startup reparse beginning. Logs directory: " + logsDir.getAbsolutePath() + ", cache file: " + cacheFile.getAbsolutePath());
+                parser.runHistoricalParse(logsDir, cacheFile);
+                FabricDashboardMod.LOGGER.info("[Dashboard] Startup reparse complete. Cache days: " + countCachedDays() + ", cache file: " + cacheFile.getAbsolutePath());
 
                 // Trigger head fetches once after the startup parse — not on every incremental update.
                 // New players discovered later will have their heads fetched on-demand by the FaceHandler.
