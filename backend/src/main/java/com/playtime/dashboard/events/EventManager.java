@@ -1,10 +1,10 @@
 package com.playtime.dashboard.events;
 
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.reflect.TypeToken;
+import com.google.gson.stream.JsonReader;
 import com.playtime.dashboard.FabricDashboardMod;
 import com.playtime.dashboard.config.DashboardConfig;
 import net.fabricmc.loader.api.FabricLoader;
@@ -32,7 +32,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class EventManager {
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Gson GSON = new Gson();
     private static EventManager instance;
 
     private static final Set<String> OBSIDIAN_IDS = Set.of(
@@ -72,6 +72,23 @@ public class EventManager {
     private Map<String, Set<UUID>> syncedObjectives = new HashMap<>(); // objName -> set of player UUIDs
     private Set<String> hiddenScoreboards = new HashSet<>(); // UUIDs of players who hid the sidebar
 
+    private static final Identifier HEADS_FONT_ID = Identifier.of("dashboard", "heads");
+    private static final net.minecraft.text.Style HEADS_STYLE = net.minecraft.text.Style.EMPTY.withFont(HEADS_FONT_ID);
+
+    /** Obsidian items/blocks resolved once after server start to avoid per-tick registry scans. */
+    private final Set<Item> obsidianItems = new HashSet<>();
+    private final Set<Block> obsidianBlocks = new HashSet<>();
+    private volatile boolean obsidianResolved = false;
+
+    /** Per-player cache of the last sent (objective, holder -> score) so we can skip unchanged updates. */
+    private final Map<UUID, ScoreboardSendState> lastSent = new HashMap<>();
+
+    private static final class ScoreboardSendState {
+        String objectiveName;
+        final Map<String, Integer> scores = new HashMap<>();
+        final Map<String, String> formats = new HashMap<>();
+    }
+
     private EventManager() {
         this.eventsFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_events.json");
         load();
@@ -86,8 +103,26 @@ public class EventManager {
 
     public void init(MinecraftServer server) {
         this.server = server;
-        com.playtime.dashboard.util.UuidCache.getInstance().refresh();
+        com.playtime.dashboard.util.UuidCache.getInstance().forceRefresh();
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            com.playtime.dashboard.util.UuidCache.getInstance()
+                .registerPlayer(player.getUuid(), player.getGameProfile().getName());
+        }
+        resolveObsidianRegistry();
         updateScoreboard();
+    }
+
+    private void resolveObsidianRegistry() {
+        if (obsidianResolved) return;
+        obsidianItems.clear();
+        obsidianBlocks.clear();
+        for (Item item : Registries.ITEM) {
+            if (OBSIDIAN_IDS.contains(Registries.ITEM.getId(item).toString())) obsidianItems.add(item);
+        }
+        for (Block block : Registries.BLOCK) {
+            if (OBSIDIAN_IDS.contains(Registries.BLOCK.getId(block).toString())) obsidianBlocks.add(block);
+        }
+        obsidianResolved = true;
     }
 
     public List<ServerEvent> getActiveEvents() {
@@ -198,19 +233,20 @@ public class EventManager {
         broadcastEventResults(eventToStop);
 
         activeEvents.remove(eventToStop);
-        
+
         Scoreboard scoreboard = server.getScoreboard();
         ScoreboardObjective objective = scoreboard.getNullableObjective(getObjectiveName(eventToStop.id));
         if (objective != null) {
             scoreboard.removeObjective(objective);
         }
 
+        lastSent.clear();
         save();
         updateScoreboard();
     }
 
     private void takeStatsSnapshot(ServerEvent event) {
-        com.playtime.dashboard.util.UuidCache.getInstance().refresh();
+        com.playtime.dashboard.util.UuidCache.getInstance().forceRefresh();
         Path statsDir = getStatsPath();
         File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
         Set<String> snapshotTaken = new HashSet<>();
@@ -280,19 +316,14 @@ public class EventManager {
 
     private void updatePlayerScore(ServerEvent event, String uuidStr, int currentValue) {
         String name = getPlayerName(uuidStr);
-        List<String> ignored = DashboardConfig.get().ignored_players.stream().map(String::toLowerCase).collect(Collectors.toList());
-        if (ignored.contains(name.toLowerCase())) {
+        DashboardConfig cfg = DashboardConfig.get();
+        if (cfg.getIgnoredLowerNames().contains(name.toLowerCase())) {
             event.currentScores.remove(uuidStr);
             return;
         }
-        
-        // Also check if the UUID matches the offline UUID of an ignored player
-        for (String ignoredName : DashboardConfig.get().ignored_players) {
-            String offlineUuid = java.util.UUID.nameUUIDFromBytes(("OfflinePlayer:" + ignoredName).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
-            if (uuidStr.equals(offlineUuid)) {
-                event.currentScores.remove(uuidStr);
-                return;
-            }
+        if (cfg.getIgnoredOfflineUuids().contains(uuidStr)) {
+            event.currentScores.remove(uuidStr);
+            return;
         }
 
         if (!event.initialStats.containsKey(uuidStr)) event.initialStats.put(uuidStr, currentValue);
@@ -325,20 +356,15 @@ public class EventManager {
     }
 
     private int sumIdSetFromPlayer(ServerPlayerEntity player, boolean placed) {
+        if (!obsidianResolved) resolveObsidianRegistry();
         int sum = 0;
         if (placed) {
-            for (Item item : Registries.ITEM) {
-                String id = Registries.ITEM.getId(item).toString();
-                if (OBSIDIAN_IDS.contains(id)) {
-                    sum += player.getStatHandler().getStat(Stats.USED, item);
-                }
+            for (Item item : obsidianItems) {
+                sum += player.getStatHandler().getStat(Stats.USED, item);
             }
         } else {
-            for (Block block : Registries.BLOCK) {
-                String id = Registries.BLOCK.getId(block).toString();
-                if (OBSIDIAN_IDS.contains(id)) {
-                    sum += player.getStatHandler().getStat(Stats.MINED, block);
-                }
+            for (Block block : obsidianBlocks) {
+                sum += player.getStatHandler().getStat(Stats.MINED, block);
             }
         }
         return sum;
@@ -361,56 +387,101 @@ public class EventManager {
         return sum;
     }
 
+    private static final java.util.function.Predicate<String> NAMESPACED_ID_FILTER = id -> id != null && id.contains(":");
+
     private int getStatValueFromDisk(File statFile, String type) {
-        try (FileReader reader = new FileReader(statFile)) {
-            JsonObject stats = JsonParser.parseReader(reader).getAsJsonObject().getAsJsonObject("stats");
-            if (stats == null) return 0;
-            switch (type) {
-                case "playtime": return getNestedInt(stats, "minecraft:custom", "minecraft:play_time");
-                case "mob_kills": return getNestedInt(stats, "minecraft:custom", "minecraft:mob_kills");
-                case "fewest_deaths": return getNestedInt(stats, "minecraft:custom", "minecraft:deaths");
-                case "damage_dealt": return getNestedInt(stats, "minecraft:custom", "minecraft:damage_dealt");
-                case "player_kills": return getNestedInt(stats, "minecraft:custom", "minecraft:player_kills");
-                case "fish_caught":
-                    int vFish = getNestedInt(stats, "minecraft:custom", "minecraft:fish_caught");
-                    return vFish + (FabricLoader.getInstance().isModLoaded("tide") ? sumTideFromDisk(stats) : 0);
-                case "daily_streak": return StreakTracker.getInstance().getStreak(statFile.getName().replace(".json", ""));
-                case "blocks_placed": return sumCategory(stats, "minecraft:used", true);
-                case "blocks_mined": return sumCategory(stats, "minecraft:mined", false);
-                case "obsidian_placed": return sumIdSetFromDisk(stats, "minecraft:used");
-                case "obsidian_mined": return sumIdSetFromDisk(stats, "minecraft:mined");
-                default: return 0;
+        switch (type) {
+            case "playtime": return readSingleStat(statFile, "minecraft:custom", "minecraft:play_time");
+            case "mob_kills": return readSingleStat(statFile, "minecraft:custom", "minecraft:mob_kills");
+            case "fewest_deaths": return readSingleStat(statFile, "minecraft:custom", "minecraft:deaths");
+            case "damage_dealt": return readSingleStat(statFile, "minecraft:custom", "minecraft:damage_dealt");
+            case "player_kills": return readSingleStat(statFile, "minecraft:custom", "minecraft:player_kills");
+            case "fish_caught": return readFishCaughtFromDisk(statFile, FabricLoader.getInstance().isModLoaded("tide"));
+            case "daily_streak": return StreakTracker.getInstance().getStreak(statFile.getName().replace(".json", ""));
+            case "blocks_placed": return sumCategoryFiltered(statFile, "minecraft:used", NAMESPACED_ID_FILTER);
+            case "blocks_mined": return sumCategoryFiltered(statFile, "minecraft:mined", null);
+            case "obsidian_placed": return sumCategoryFiltered(statFile, "minecraft:used", OBSIDIAN_IDS::contains);
+            case "obsidian_mined": return sumCategoryFiltered(statFile, "minecraft:mined", OBSIDIAN_IDS::contains);
+            default: return 0;
+        }
+    }
+
+    private int readSingleStat(File statFile, String category, String stat) {
+        try (JsonReader r = new JsonReader(new FileReader(statFile))) {
+            r.beginObject();
+            while (r.hasNext()) {
+                if (!"stats".equals(r.nextName())) { r.skipValue(); continue; }
+                r.beginObject();
+                while (r.hasNext()) {
+                    if (!category.equals(r.nextName())) { r.skipValue(); continue; }
+                    r.beginObject();
+                    while (r.hasNext()) {
+                        if (stat.equals(r.nextName())) return (int) r.nextLong();
+                        r.skipValue();
+                    }
+                    return 0;
+                }
+                return 0;
             }
+            return 0;
         } catch (Exception e) { return 0; }
     }
 
-    private int getNestedInt(JsonObject stats, String category, String stat) {
-        if (stats.has(category)) {
-            JsonObject cat = stats.getAsJsonObject(category);
-            if (cat.has(stat)) return cat.get(stat).getAsInt();
-        }
-        return 0;
+    private int sumCategoryFiltered(File statFile, String category, java.util.function.Predicate<String> filter) {
+        int sum = 0;
+        try (JsonReader r = new JsonReader(new FileReader(statFile))) {
+            r.beginObject();
+            while (r.hasNext()) {
+                if (!"stats".equals(r.nextName())) { r.skipValue(); continue; }
+                r.beginObject();
+                while (r.hasNext()) {
+                    if (!category.equals(r.nextName())) { r.skipValue(); continue; }
+                    r.beginObject();
+                    while (r.hasNext()) {
+                        String id = r.nextName();
+                        if (filter == null || filter.test(id)) sum += (int) r.nextLong();
+                        else r.skipValue();
+                    }
+                    return sum;
+                }
+                return sum;
+            }
+            return sum;
+        } catch (Exception e) { return 0; }
     }
 
-    private int sumCategory(JsonObject stats, String category, boolean blocksOnly) {
-        if (!stats.has(category)) return 0;
-        JsonObject cat = stats.getAsJsonObject(category);
-        int sum = 0;
-        for (String id : cat.keySet()) {
-            if (blocksOnly && !id.contains(":")) continue;
-            sum += cat.get(id).getAsInt();
-        }
-        return sum;
-    }
-
-    private int sumIdSetFromDisk(JsonObject stats, String category) {
-        if (!stats.has(category)) return 0;
-        JsonObject cat = stats.getAsJsonObject(category);
-        int sum = 0;
-        for (String id : cat.keySet()) {
-            if (OBSIDIAN_IDS.contains(id)) sum += cat.get(id).getAsInt();
-        }
-        return sum;
+    private int readFishCaughtFromDisk(File statFile, boolean includeTide) {
+        int total = 0;
+        try (JsonReader r = new JsonReader(new FileReader(statFile))) {
+            r.beginObject();
+            while (r.hasNext()) {
+                if (!"stats".equals(r.nextName())) { r.skipValue(); continue; }
+                r.beginObject();
+                while (r.hasNext()) {
+                    String cat = r.nextName();
+                    if ("minecraft:custom".equals(cat)) {
+                        r.beginObject();
+                        while (r.hasNext()) {
+                            if ("minecraft:fish_caught".equals(r.nextName())) total += (int) r.nextLong();
+                            else r.skipValue();
+                        }
+                        r.endObject();
+                    } else if (includeTide && "minecraft:used".equals(cat)) {
+                        r.beginObject();
+                        while (r.hasNext()) {
+                            String id = r.nextName();
+                            if (id.startsWith("tide:")) total += (int) r.nextLong();
+                            else r.skipValue();
+                        }
+                        r.endObject();
+                    } else {
+                        r.skipValue();
+                    }
+                }
+                return total;
+            }
+            return total;
+        } catch (Exception e) { return 0; }
     }
 
     private int sumTideFromPlayer(ServerPlayerEntity player) {
@@ -423,24 +494,21 @@ public class EventManager {
         return sum;
     }
 
-    private int sumTideFromDisk(JsonObject stats) {
-        if (!stats.has("minecraft:used")) return 0;
-        JsonObject used = stats.getAsJsonObject("minecraft:used");
-        int sum = 0;
-        for (String id : used.keySet()) {
-            if (id.startsWith("tide:")) sum += used.get(id).getAsInt();
-        }
-        return sum;
-    }
-
     public void onPlayerJoin(ServerPlayerEntity player) {
         UUID uuid = player.getUuid();
         syncedObjectives.values().forEach(set -> set.remove(uuid));
+        lastSent.remove(uuid);
     }
 
     public void onPlayerLeave(ServerPlayerEntity player) {
         UUID uuid = player.getUuid();
         syncedObjectives.values().forEach(set -> set.remove(uuid));
+        lastSent.remove(uuid);
+    }
+
+    /** Drops the per-player diff cache so the next tick resends everything. */
+    public void invalidateScoreboardCache() {
+        lastSent.clear();
     }
 
     public void updateScoreboard() {
@@ -463,9 +531,11 @@ public class EventManager {
         }
 
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            String uuidStr = player.getUuid().toString();
+            UUID playerUuid = player.getUuid();
+            String uuidStr = playerUuid.toString();
             if (hiddenScoreboards != null && hiddenScoreboards.contains(uuidStr)) {
                 player.networkHandler.sendPacket(new ScoreboardDisplayS2CPacket(ScoreboardDisplaySlot.SIDEBAR, null));
+                lastSent.remove(playerUuid);
                 continue;
             }
             String prefId = playerPreferences.get(uuidStr);
@@ -473,50 +543,66 @@ public class EventManager {
                     .orElse(activeEvents.get(0));
 
             ScoreboardObjective obj = scoreboard.getNullableObjective(getObjectiveName(displayEvent.id));
-            if (obj != null) {
-                // Ensure client knows about this specific objective
-                Set<UUID> synced = syncedObjectives.computeIfAbsent(obj.getName(), k -> new HashSet<>());
-                if (!synced.contains(player.getUuid())) {
-                    player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.ScoreboardObjectiveUpdateS2CPacket(obj, 0));
-                    synced.add(player.getUuid());
+            if (obj == null) continue;
+
+            ScoreboardSendState sendState = lastSent.computeIfAbsent(playerUuid, k -> new ScoreboardSendState());
+            boolean objectiveChanged = !obj.getName().equals(sendState.objectiveName);
+            if (objectiveChanged) {
+                sendState.objectiveName = obj.getName();
+                sendState.scores.clear();
+                sendState.formats.clear();
+            }
+
+            Set<UUID> synced = syncedObjectives.computeIfAbsent(obj.getName(), k -> new HashSet<>());
+            if (!synced.contains(playerUuid)) {
+                player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.ScoreboardObjectiveUpdateS2CPacket(obj, 0));
+                synced.add(playerUuid);
+            }
+
+            // Sidebar display packet is cheap and ensures the player's view is correct on (re)join.
+            player.networkHandler.sendPacket(new ScoreboardDisplayS2CPacket(ScoreboardDisplaySlot.SIDEBAR, obj));
+
+            long remainingMs = displayEvent.endTime - System.currentTimeMillis();
+            int remainingSeconds = (int) Math.max(0, remainingMs / 1000);
+            net.minecraft.text.MutableText timerText = Text.literal("§b§lTime Left: §r§f" + formatTime(remainingSeconds));
+            player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
+                "_time_remaining_",
+                obj.getName(),
+                Integer.MAX_VALUE,
+                Optional.of(timerText),
+                Optional.of(BlankNumberFormat.INSTANCE)
+            ));
+
+            Map<String, Integer> scores = displayEvent.currentScores;
+
+            for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+                String name = getPlayerName(entry.getKey());
+                int val = entry.getValue();
+                int internalScore = displayEvent.lowerIsBetter ? Integer.MAX_VALUE - val : val;
+                String formatStr = formatScoreValue(displayEvent, val);
+
+                Integer prevScore = sendState.scores.get(name);
+                String prevFormat = sendState.formats.get(name);
+                if (prevScore != null && prevScore == internalScore && formatStr.equals(prevFormat)) {
+                    continue;
                 }
 
-                // Force sidebar display
-                player.networkHandler.sendPacket(new ScoreboardDisplayS2CPacket(ScoreboardDisplaySlot.SIDEBAR, obj));
+                net.minecraft.text.MutableText text = Text.empty();
+                String glyph = com.playtime.dashboard.util.PlayerHeadFontManager.getHeadGlyph(name);
+                if (!glyph.isEmpty()) {
+                    text.append(Text.literal(glyph).setStyle(HEADS_STYLE));
+                }
+                text.append(Text.literal(" §f" + name));
 
-                long remainingMs = displayEvent.endTime - System.currentTimeMillis();
-                int remainingSeconds = (int) Math.max(0, remainingMs / 1000);
-                net.minecraft.text.MutableText timerText = Text.literal("§b§lTime Left: §r§f" + formatTime(remainingSeconds));
                 player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
-                    "_time_remaining_",
+                    name,
                     obj.getName(),
-                    Integer.MAX_VALUE,
-                    Optional.of(timerText),
-                    Optional.of(BlankNumberFormat.INSTANCE)
+                    internalScore,
+                    Optional.of(text),
+                    Optional.of(new FixedNumberFormat(Text.literal("§e" + formatStr)))
                 ));
-
-                Map<String, Integer> scores = displayEvent.currentScores;
-                
-                for (Map.Entry<String, Integer> entry : scores.entrySet()) {
-                    String name = getPlayerName(entry.getKey());
-                    int val = entry.getValue();
-                    int internalScore = displayEvent.lowerIsBetter ? Integer.MAX_VALUE - val : val;
-                    
-                    net.minecraft.text.MutableText text = Text.empty();
-                    String glyph = com.playtime.dashboard.util.PlayerHeadFontManager.getHeadGlyph(name);
-                    if (!glyph.isEmpty()) {
-                        text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
-                    }
-                    text.append(Text.literal(" §f" + name));
-
-                    player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
-                        name, 
-                        obj.getName(), 
-                        internalScore, 
-                        Optional.of(text), 
-                        Optional.of(new FixedNumberFormat(Text.literal("§e" + formatScoreValue(displayEvent, val))))
-                    ));
-                }
+                sendState.scores.put(name, internalScore);
+                sendState.formats.put(name, formatStr);
             }
         }
     }
@@ -527,14 +613,14 @@ public class EventManager {
             String name = getPlayerName(uuid);
             ScoreHolder holder = ScoreHolder.fromName(name);
             var score = scoreboard.getOrCreateScore(holder, objective);
-            
+
             net.minecraft.text.MutableText text = Text.empty();
             String glyph = com.playtime.dashboard.util.PlayerHeadFontManager.getHeadGlyph(name);
             if (!glyph.isEmpty()) {
-                text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
+                text.append(Text.literal(glyph).setStyle(HEADS_STYLE));
             }
             text.append(Text.literal(" §f" + name));
-            
+
             score.setDisplayText(text);
             score.setNumberFormat(new FixedNumberFormat(Text.literal("§e" + formatScoreValue(event, val))));
             score.setScore(event.lowerIsBetter ? Integer.MAX_VALUE - val : val);
@@ -556,6 +642,7 @@ public class EventManager {
 
     public void setPlayerScoreboardPreference(UUID uuid, String eventId) {
         playerPreferences.put(uuid.toString(), eventId);
+        lastSent.remove(uuid);
         save();
         updateScoreboard();
     }
@@ -564,6 +651,7 @@ public class EventManager {
         String uuidStr = uuid.toString();
         if (hidden) hiddenScoreboards.add(uuidStr);
         else hiddenScoreboards.remove(uuidStr);
+        lastSent.remove(uuid);
         save();
         updateScoreboard();
     }
@@ -597,27 +685,28 @@ public class EventManager {
 
     private String getPlayerName(String uuidStr) {
         String name = uuidStr;
-        try {
-            UUID uuid = UUID.fromString(uuidStr);
-            ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
-            if (player != null) {
-                name = player.getGameProfile().getName();
-            } else {
-                name = server.getUserCache().getByUuid(uuid).map(p -> p.getName()).orElseGet(() -> 
-                    com.playtime.dashboard.util.UuidCache.getInstance().getUsername(uuid).orElse(uuidStr)
-                );
-            }
-        } catch (Exception e) { /* ignored */ }
-
-        // Apply Aliases
-        Map<String, String> aliases = DashboardConfig.get().player_aliases;
-        if (aliases != null) {
-            if (aliases.containsKey(uuidStr)) return aliases.get(uuidStr).trim();
-            if (aliases.containsKey(name)) return aliases.get(name).trim();
-            if (aliases.containsKey(name.toLowerCase())) return aliases.get(name.toLowerCase()).trim();
+        if (isUUID(uuidStr)) {
+            try {
+                UUID uuid = UUID.fromString(uuidStr);
+                ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+                if (player != null) {
+                    name = player.getGameProfile().getName();
+                } else {
+                    name = server.getUserCache().getByUuid(uuid).map(p -> p.getName()).orElseGet(() ->
+                        com.playtime.dashboard.util.UuidCache.getInstance().getUsername(uuid).orElse(uuidStr)
+                    );
+                }
+            } catch (Exception e) { /* ignored */ }
         }
 
-        // Hardcoded grouping
+        Map<String, String> aliases = DashboardConfig.get().getAliasesLower();
+        if (!aliases.isEmpty()) {
+            String byUuid = aliases.get(uuidStr.toLowerCase());
+            if (byUuid != null) return byUuid;
+            String byName = aliases.get(name.toLowerCase());
+            if (byName != null) return byName;
+        }
+
         if (name.equalsIgnoreCase("hanger") || name.equalsIgnoreCase("advent")) {
             return "Advent/Hanger";
         }

@@ -9,8 +9,13 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 import java.util.Map;
 import java.util.HashMap;
@@ -43,11 +48,54 @@ public class DashboardConfig {
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static DashboardConfig instance;
 
+    /** Precomputed lowercase ignored-player names. Recomputed in {@link #load()}. */
+    private transient volatile Set<String> ignoredLowerNames = Collections.emptySet();
+    /** Precomputed offline UUIDs ({@code OfflinePlayer:<name>}) for ignored players. */
+    private transient volatile Set<String> ignoredOfflineUuids = Collections.emptySet();
+    /** Precomputed lower-case alias map (key = lowercased original key). */
+    private transient volatile Map<String, String> aliasesLower = Collections.emptyMap();
+
     public static DashboardConfig get() {
         if (instance == null) {
             load();
         }
         return instance;
+    }
+
+    public Set<String> getIgnoredLowerNames() {
+        return ignoredLowerNames;
+    }
+
+    public Set<String> getIgnoredOfflineUuids() {
+        return ignoredOfflineUuids;
+    }
+
+    public Map<String, String> getAliasesLower() {
+        return aliasesLower;
+    }
+
+    private void recomputeDerived() {
+        Set<String> names = new HashSet<>();
+        Set<String> offlineUuids = new HashSet<>();
+        if (ignored_players != null) {
+            for (String n : ignored_players) {
+                if (n == null || n.isEmpty()) continue;
+                names.add(n.toLowerCase());
+                String offline = UUID.nameUUIDFromBytes(("OfflinePlayer:" + n).getBytes(StandardCharsets.UTF_8)).toString();
+                offlineUuids.add(offline);
+            }
+        }
+        ignoredLowerNames = Collections.unmodifiableSet(names);
+        ignoredOfflineUuids = Collections.unmodifiableSet(offlineUuids);
+
+        Map<String, String> al = new HashMap<>();
+        if (player_aliases != null) {
+            for (Map.Entry<String, String> e : player_aliases.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) continue;
+                al.put(e.getKey().toLowerCase(), e.getValue().trim());
+            }
+        }
+        aliasesLower = Collections.unmodifiableMap(al);
     }
 
     public static void load() {
@@ -65,7 +113,9 @@ public class DashboardConfig {
             instance = new DashboardConfig();
             newlyCreated = true;
         }
-        
+
+        instance.recomputeDerived();
+
         // Only save if it's a brand new config to avoid overwriting user edits
         if (newlyCreated) {
             save();

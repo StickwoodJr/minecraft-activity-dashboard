@@ -121,6 +121,15 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. |
 | `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. |
 
+## 🚀 High-Performance Architecture
+This mod is built with a focus on extreme efficiency, ensuring that tracking hundreds of players has negligible impact on your server's TPS and memory.
+
+- **Streaming JSON Processing**: Uses GSON streaming to process multi-megabyte stats and log files. This avoids large memory spikes by never loading entire data files into the heap at once.
+- **Scoreboard Packet Diffing**: Drastically reduces network traffic and CPU overhead by tracking the state of player sidebars. Packets are only sent when a score or formatting actually changes.
+- **Throttled I/O & Memoization**: Disk reads and complex calculations (like daily streaks) are throttled and memoized to prevent redundant I/O during high-frequency events.
+- **Bounded LRU Caching**: All network-based lookups (UUIDs, skins) are stored in bounded Least-Recently-Used (LRU) caches, preventing memory leaks during long uptimes.
+- **Gzip Compressed API**: All web dashboard responses are negotiated with Gzip compression, reducing bandwidth usage by up to 90% for large activity datasets.
+
 ## Performance & Privacy
 - **Zero Database**: No SQL setup required; uses an optimized JSON flat-file cache.
 - **Background Processing**: All log parsing and stats aggregation happens on a low-priority background thread to prevent server lag or TPS drops.

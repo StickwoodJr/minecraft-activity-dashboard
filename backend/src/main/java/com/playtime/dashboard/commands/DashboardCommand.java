@@ -230,6 +230,7 @@ public class DashboardCommand {
                 .requires(source -> source.hasPermissionLevel(2))
                 .executes(context -> {
                     com.playtime.dashboard.config.DashboardConfig.load();
+                    EventManager.getInstance().invalidateScoreboardCache();
                     context.getSource().sendFeedback(() -> Text.literal("§a[Dashboard] Config reloaded!"), true);
                     return 1;
                 })

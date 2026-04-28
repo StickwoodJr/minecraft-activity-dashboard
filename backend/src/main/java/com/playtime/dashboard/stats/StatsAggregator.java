@@ -15,7 +15,6 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -48,7 +47,7 @@ public class StatsAggregator {
 
     public Map<String, Map<String, Map<String, Integer>>> buildLeaderboards(Path statsDir, UuidCache uuidCache) {
         // Map<Category, Map<Stat, Map<PlayerName, Value>>>
-        Map<String, Map<String, Map<String, Integer>>> result = new LinkedHashMap<>();
+        Map<String, Map<String, Map<String, Integer>>> result = new HashMap<>();
         Map<String, String> playerToUuid = new HashMap<>();
 
         File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
@@ -117,7 +116,7 @@ public class StatsAggregator {
         int redstoneUsed = 0;
         int mobKills = 0;
 
-        Map<String, Map<String, Integer>> filteredCategory = result.computeIfAbsent("general", k -> new LinkedHashMap<>());
+        Map<String, Map<String, Integer>> filteredCategory = result.computeIfAbsent("general", k -> new HashMap<>());
 
         while (reader.hasNext()) {
             String rootKey = reader.nextName();
@@ -284,7 +283,7 @@ public class StatsAggregator {
     }
 
     private void addGeneralStat(Map<String, Map<String, Integer>> filteredCategory, String playerName, String key, int value) {
-        Map<String, Integer> statMap = filteredCategory.computeIfAbsent(key, k -> new LinkedHashMap<>());
+        Map<String, Integer> statMap = filteredCategory.computeIfAbsent(key, k -> new HashMap<>());
         statMap.merge(playerName, value, Integer::sum);
     }
 

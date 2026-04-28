@@ -12,13 +12,14 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public class PlayerHeadFontManager {
     private static final int BASE_CODEPOINT = 0xE000;
     private static final Map<String, Integer> playerSlots = new ConcurrentHashMap<>();
-    private static int nextSlot = 0;
+    private static final AtomicInteger nextSlot = new AtomicInteger(0);
     
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -32,9 +33,8 @@ public class PlayerHeadFontManager {
                 for (String key : json.keySet()) {
                     int slot = json.get(key).getAsInt();
                     playerSlots.put(key, slot);
-                    if (slot >= nextSlot) {
-                        nextSlot = slot + 1;
-                    }
+                    final int target = slot + 1;
+                    nextSlot.updateAndGet(prev -> Math.max(prev, target));
                 }
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to load slots.json", e);
@@ -59,7 +59,7 @@ public class PlayerHeadFontManager {
     }
 
     public static String getHeadGlyph(String playerName) {
-        if (playerSlots.isEmpty() && nextSlot == 0) {
+        if (playerSlots.isEmpty() && nextSlot.get() == 0) {
             loadSlots();
         }
 
@@ -75,12 +75,10 @@ public class PlayerHeadFontManager {
 
         boolean[] isNew = {false};
         int slot = playerSlots.computeIfAbsent(playerName, k -> {
-            synchronized (PlayerHeadFontManager.class) {
-                isNew[0] = true;
-                return nextSlot++;
-            }
+            isNew[0] = true;
+            return nextSlot.getAndIncrement();
         });
-        
+
         if (isNew[0]) {
             FabricDashboardMod.LOGGER.info("Assigned new font slot {} (charCode={}) to {}", slot, Integer.toHexString(BASE_CODEPOINT + slot), playerName);
             saveSlots();
