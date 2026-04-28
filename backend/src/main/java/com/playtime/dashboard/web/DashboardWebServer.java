@@ -19,7 +19,9 @@ import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonWriter;
 
 import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -53,10 +55,27 @@ public class DashboardWebServer {
     private static final long WORLD_SIZE_REFRESH_MS = 30L * 60L * 1000L;
     private static final int WORLD_SIZE_MAX_DEPTH = 8;
 
+    public static class LivePlayerEntry {
+        public final String name;
+        public final double x;
+        public final double y;
+        public final double z;
+        public final String dimension;
+
+        public LivePlayerEntry(String name, double x, double y, double z, String dimension) {
+            this.name = name;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.dimension = dimension;
+        }
+    }
+
     public static class LiveMetricsSnapshot {
         public final int playersOnline;
         public final int maxPlayers;
         public final List<String> playerNames;
+        public final List<LivePlayerEntry> players;
         public final double tps;
         public final double mspt;
         public final double cpuProcess;
@@ -69,13 +88,15 @@ public class DashboardWebServer {
         public final String status;
         public final long timestamp;
 
-        public LiveMetricsSnapshot(int playersOnline, int maxPlayers, List<String> playerNames, 
-                                   double tps, double mspt, double cpuProcess, 
-                                   long jvmUsedMb, long jvmMaxMb, double diskUsedGb, 
+        public LiveMetricsSnapshot(int playersOnline, int maxPlayers, List<String> playerNames,
+                                   List<LivePlayerEntry> players,
+                                   double tps, double mspt, double cpuProcess,
+                                   long jvmUsedMb, long jvmMaxMb, double diskUsedGb,
                                    double diskTotalGb, double diskFreeGb, long worldSizeMb, String status) {
             this.playersOnline = playersOnline;
             this.maxPlayers = maxPlayers;
             this.playerNames = Collections.unmodifiableList(playerNames);
+            this.players = Collections.unmodifiableList(players);
             this.tps = tps;
             this.mspt = mspt;
             this.cpuProcess = cpuProcess;
@@ -91,7 +112,7 @@ public class DashboardWebServer {
 
         // Warming up constructor
         public LiveMetricsSnapshot() {
-            this(0, 0, new ArrayList<>(), 0, 0, 0, 0, 0, 0, 0, 0, 0, "warming_up");
+            this(0, 0, new ArrayList<>(), new ArrayList<>(), 0, 0, 0, 0, 0, 0, 0, 0, 0, "warming_up");
         }
     }
 
@@ -125,6 +146,7 @@ public class DashboardWebServer {
             httpServer.createContext("/api/player-advancements/", new PlayerAdvancementsHandler(statsAggregator, uuidCache));
             httpServer.createContext("/api/live", new LiveMetricsHandler(this));
             httpServer.createContext("/api/events", new EventsHandler());
+            httpServer.createContext("/api/dynmap-config", new DynmapConfigHandler());
             httpServer.createContext("/respack.zip", new RespackHandler());
             
             httpServer.setExecutor(Executors.newFixedThreadPool(2));
@@ -229,9 +251,13 @@ public class DashboardWebServer {
             int playersOnline = minecraftServer.getPlayerManager().getCurrentPlayerCount();
             int maxPlayers = minecraftServer.getPlayerManager().getMaxPlayerCount();
             List<String> playerNames = new ArrayList<>();
+            List<LivePlayerEntry> players = new ArrayList<>();
             minecraftServer.getPlayerManager().getPlayerList().forEach(player -> {
                 if (playerNames.size() < 100) {
-                    playerNames.add(player.getGameProfile().getName());
+                    String name = player.getGameProfile().getName();
+                    playerNames.add(name);
+                    String dim = player.getWorld().getRegistryKey().getValue().toString();
+                    players.add(new LivePlayerEntry(name, player.getX(), player.getY(), player.getZ(), dim));
                 }
             });
 
@@ -276,9 +302,10 @@ public class DashboardWebServer {
                 lastWorldSizeCheck = System.currentTimeMillis();
             }
 
-            this.liveSnapshot = new LiveMetricsSnapshot(playersOnline, maxPlayers, playerNames, 
-                                                        tps, mspt, cpuProcess, 
-                                                        jvmUsedMb, jvmMaxMb, diskUsedGb, 
+            this.liveSnapshot = new LiveMetricsSnapshot(playersOnline, maxPlayers, playerNames,
+                                                        players,
+                                                        tps, mspt, cpuProcess,
+                                                        jvmUsedMb, jvmMaxMb, diskUsedGb,
                                                         diskTotalGb, diskFreeGb, cachedWorldSizeMb, "ok");
         } catch (Exception e) {
             FabricDashboardMod.LOGGER.error("Failed to update live metrics", e);
@@ -821,6 +848,80 @@ public class DashboardWebServer {
             
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(response);
+            }
+        }
+    }
+
+    /**
+     * Proxies Dynmap's configuration JSON so the frontend can resolve world ids without CORS failures.
+     */
+    private static class DynmapConfigHandler implements HttpHandler {
+        private volatile byte[] cachedResponse;
+        private volatile long cachedAt;
+        private static final long CACHE_TTL_MS = 5L * 60L * 1000L;
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            String dynmapUrl = DashboardConfig.get().dynmap_url;
+            if (dynmapUrl == null || dynmapUrl.isEmpty()) {
+                exchange.sendResponseHeaders(503, -1);
+                return;
+            }
+
+            byte[] body = cachedResponse;
+            if (body == null || System.currentTimeMillis() - cachedAt > CACHE_TTL_MS) {
+                byte[] fetched = fetchConfig(dynmapUrl);
+                if (fetched != null) {
+                    cachedResponse = fetched;
+                    cachedAt = System.currentTimeMillis();
+                    body = fetched;
+                }
+            }
+
+            if (body == null) {
+                exchange.sendResponseHeaders(502, -1);
+                return;
+            }
+
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        }
+
+        private byte[] fetchConfig(String dynmapUrl) {
+            try {
+                String base = dynmapUrl.split("\\?")[0].split("#")[0];
+                if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+                URL url = new URL(base + "/up/configuration");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(10000);
+                conn.setRequestMethod("GET");
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    FabricDashboardMod.LOGGER.warn("Dynmap config proxy: upstream returned HTTP " + code);
+                    return null;
+                }
+                try (InputStream in = conn.getInputStream();
+                     ByteArrayOutputStream buf = new ByteArrayOutputStream()) {
+                    byte[] tmp = new byte[8192];
+                    int n;
+                    while ((n = in.read(tmp)) != -1) buf.write(tmp, 0, n);
+                    return buf.toByteArray();
+                }
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.warn("Dynmap config proxy: failed to fetch upstream", e);
+                return null;
             }
         }
     }
