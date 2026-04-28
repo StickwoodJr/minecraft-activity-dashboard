@@ -13,6 +13,7 @@ import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.scoreboard.*;
 import net.minecraft.scoreboard.number.BlankNumberFormat;
+import net.minecraft.scoreboard.number.FixedNumberFormat;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.stat.StatType;
@@ -33,6 +34,35 @@ import java.util.stream.Collectors;
 public class EventManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static EventManager instance;
+
+    private static final Set<String> OBSIDIAN_IDS = Set.of(
+        "minecraft:obsidian",
+        "minecraft:crying_obsidian",
+        "betternether:blue_weeping_obsidian",
+        "betternether:weeping_obsidian",
+        "betternether:blue_crying_obsidian",
+        "betternether:obsidian_bricks",
+        "betternether:obsidian_bricks_stairs",
+        "betternether:obsidian_bricks_slab",
+        "betternether:obsidian_tile",
+        "betternether:obsidian_tile_small",
+        "betternether:obsidian_tile_stairs",
+        "betternether:obsidian_tile_slab",
+        "betternether:obsidian_rod_tiles",
+        "betternether:obsidian_glass",
+        "betternether:obsidian_glass_pane",
+        "betternether:blue_obsidian",
+        "betternether:blue_obsidian_bricks",
+        "betternether:blue_obsidian_bricks_stairs",
+        "betternether:blue_obsidian_bricks_slab",
+        "betternether:blue_obsidian_tile",
+        "betternether:blue_obsidian_tile_small",
+        "betternether:blue_obsidian_tile_stairs",
+        "betternether:blue_obsidian_tile_slab",
+        "betternether:blue_obsidian_rod_tiles",
+        "betternether:blue_obsidian_glass",
+        "betternether:blue_obsidian_glass_pane"
+    );
     private final File eventsFile;
     private MinecraftServer server;
     
@@ -40,6 +70,7 @@ public class EventManager {
     private Map<String, String> playerPreferences = new HashMap<>(); // UUID -> eventId
     private Map<String, Integer> allTimePoints = new HashMap<>();
     private Map<String, Set<UUID>> syncedObjectives = new HashMap<>(); // objName -> set of player UUIDs
+    private Set<String> hiddenScoreboards = new HashSet<>(); // UUIDs of players who hid the sidebar
 
     private EventManager() {
         this.eventsFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_events.json");
@@ -60,6 +91,7 @@ public class EventManager {
     }
 
     public List<ServerEvent> getActiveEvents() {
+        if (activeEvents == null) activeEvents = new ArrayList<>();
         return activeEvents;
     }
 
@@ -163,8 +195,8 @@ public class EventManager {
 
         updateScores(eventToStop);
         distributePoints(eventToStop);
-        
-        server.getPlayerManager().broadcast(Text.literal("§6[Event] §cEvent ended: §l" + eventToStop.title), false);
+        broadcastEventResults(eventToStop);
+
         activeEvents.remove(eventToStop);
         
         Scoreboard scoreboard = server.getScoreboard();
@@ -286,8 +318,30 @@ public class EventManager {
             case "daily_streak": return StreakTracker.getInstance().getStreak(player.getUuid().toString());
             case "blocks_placed": return sumCategoryPlayer(player, Stats.USED, true);
             case "blocks_mined": return sumCategoryPlayer(player, Stats.MINED, false);
+            case "obsidian_placed": return sumIdSetFromPlayer(player, true);
+            case "obsidian_mined": return sumIdSetFromPlayer(player, false);
             default: return 0;
         }
+    }
+
+    private int sumIdSetFromPlayer(ServerPlayerEntity player, boolean placed) {
+        int sum = 0;
+        if (placed) {
+            for (Item item : Registries.ITEM) {
+                String id = Registries.ITEM.getId(item).toString();
+                if (OBSIDIAN_IDS.contains(id)) {
+                    sum += player.getStatHandler().getStat(Stats.USED, item);
+                }
+            }
+        } else {
+            for (Block block : Registries.BLOCK) {
+                String id = Registries.BLOCK.getId(block).toString();
+                if (OBSIDIAN_IDS.contains(id)) {
+                    sum += player.getStatHandler().getStat(Stats.MINED, block);
+                }
+            }
+        }
+        return sum;
     }
 
     private int sumCategoryPlayer(ServerPlayerEntity player, StatType<?> type, boolean blocksOnly) {
@@ -323,6 +377,8 @@ public class EventManager {
                 case "daily_streak": return StreakTracker.getInstance().getStreak(statFile.getName().replace(".json", ""));
                 case "blocks_placed": return sumCategory(stats, "minecraft:used", true);
                 case "blocks_mined": return sumCategory(stats, "minecraft:mined", false);
+                case "obsidian_placed": return sumIdSetFromDisk(stats, "minecraft:used");
+                case "obsidian_mined": return sumIdSetFromDisk(stats, "minecraft:mined");
                 default: return 0;
             }
         } catch (Exception e) { return 0; }
@@ -343,6 +399,16 @@ public class EventManager {
         for (String id : cat.keySet()) {
             if (blocksOnly && !id.contains(":")) continue;
             sum += cat.get(id).getAsInt();
+        }
+        return sum;
+    }
+
+    private int sumIdSetFromDisk(JsonObject stats, String category) {
+        if (!stats.has(category)) return 0;
+        JsonObject cat = stats.getAsJsonObject(category);
+        int sum = 0;
+        for (String id : cat.keySet()) {
+            if (OBSIDIAN_IDS.contains(id)) sum += cat.get(id).getAsInt();
         }
         return sum;
     }
@@ -398,6 +464,10 @@ public class EventManager {
 
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             String uuidStr = player.getUuid().toString();
+            if (hiddenScoreboards != null && hiddenScoreboards.contains(uuidStr)) {
+                player.networkHandler.sendPacket(new ScoreboardDisplayS2CPacket(ScoreboardDisplaySlot.SIDEBAR, null));
+                continue;
+            }
             String prefId = playerPreferences.get(uuidStr);
             ServerEvent displayEvent = activeEvents.stream().filter(e -> e.id.equals(prefId)).findFirst()
                     .orElse(activeEvents.get(0));
@@ -413,8 +483,18 @@ public class EventManager {
 
                 // Force sidebar display
                 player.networkHandler.sendPacket(new ScoreboardDisplayS2CPacket(ScoreboardDisplaySlot.SIDEBAR, obj));
-                
-                int count = 0;
+
+                long remainingMs = displayEvent.endTime - System.currentTimeMillis();
+                int remainingSeconds = (int) Math.max(0, remainingMs / 1000);
+                net.minecraft.text.MutableText timerText = Text.literal("§b§lTime Left: §r§f" + formatTime(remainingSeconds));
+                player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
+                    "_time_remaining_",
+                    obj.getName(),
+                    Integer.MAX_VALUE,
+                    Optional.of(timerText),
+                    Optional.of(BlankNumberFormat.INSTANCE)
+                ));
+
                 Map<String, Integer> scores = displayEvent.currentScores;
                 
                 for (Map.Entry<String, Integer> entry : scores.entrySet()) {
@@ -427,19 +507,16 @@ public class EventManager {
                     if (!glyph.isEmpty()) {
                         text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
                     }
-                    text.append(Text.literal(" §f" + name + " §e" + (displayEvent.type.equals("playtime") ? formatTime(val) : (displayEvent.type.equals("damage_dealt") ? val + " ❤" : val))));
+                    text.append(Text.literal(" §f" + name));
 
                     player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
                         name, 
                         obj.getName(), 
                         internalScore, 
                         Optional.of(text), 
-                        Optional.of(BlankNumberFormat.INSTANCE)
+                        Optional.of(new FixedNumberFormat(Text.literal("§e" + formatScoreValue(displayEvent, val))))
                     ));
-                    count++;
                 }
-                
-                FabricDashboardMod.LOGGER.info("[Scoreboard] Sent {} scores to {} for event {}", count, player.getGameProfile().getName(), displayEvent.title);
             }
         }
     }
@@ -456,10 +533,10 @@ public class EventManager {
             if (!glyph.isEmpty()) {
                 text.append(Text.literal(glyph).setStyle(net.minecraft.text.Style.EMPTY.withFont(Identifier.of("dashboard", "heads"))));
             }
-            text.append(Text.literal(" §f" + name + " §e" + (event.type.equals("playtime") ? formatTime(val) : (event.type.equals("damage_dealt") ? val + " ❤" : val))));
+            text.append(Text.literal(" §f" + name));
             
             score.setDisplayText(text);
-            score.setNumberFormat(BlankNumberFormat.INSTANCE);
+            score.setNumberFormat(new FixedNumberFormat(Text.literal("§e" + formatScoreValue(event, val))));
             score.setScore(event.lowerIsBetter ? Integer.MAX_VALUE - val : val);
         });
     }
@@ -471,10 +548,28 @@ public class EventManager {
         return (d > 0 ? d + "d " : "") + (h > 0 || d > 0 ? h + "h " : "") + (m > 0 || h > 0 || d > 0 ? m + "m " : "") + s + "s";
     }
 
+    private String formatScoreValue(ServerEvent event, int val) {
+        if (event.type.equals("playtime")) return formatTime(val);
+        if (event.type.equals("damage_dealt")) return val + " ❤";
+        return String.valueOf(val);
+    }
+
     public void setPlayerScoreboardPreference(UUID uuid, String eventId) {
         playerPreferences.put(uuid.toString(), eventId);
         save();
         updateScoreboard();
+    }
+
+    public void setScoreboardHidden(UUID uuid, boolean hidden) {
+        String uuidStr = uuid.toString();
+        if (hidden) hiddenScoreboards.add(uuidStr);
+        else hiddenScoreboards.remove(uuidStr);
+        save();
+        updateScoreboard();
+    }
+
+    public boolean isScoreboardHidden(UUID uuid) {
+        return hiddenScoreboards != null && hiddenScoreboards.contains(uuid.toString());
     }
 
     public void clearAllPoints(int amount) {
@@ -494,6 +589,10 @@ public class EventManager {
         if (amount <= 0) allTimePoints.remove(uuidStr);
         else allTimePoints.computeIfPresent(uuidStr, (k, v) -> Math.max(0, v - amount));
         save();
+    }
+
+    public String resolvePlayerName(String uuidStr) {
+        return getPlayerName(uuidStr);
     }
 
     private String getPlayerName(String uuidStr) {
@@ -533,7 +632,12 @@ public class EventManager {
             if (data.has("activeEvents")) activeEvents = GSON.fromJson(data.get("activeEvents"), new TypeToken<List<ServerEvent>>(){}.getType());
             if (data.has("playerPreferences")) playerPreferences = GSON.fromJson(data.get("playerPreferences"), new TypeToken<Map<String, String>>(){}.getType());
             if (data.has("allTimePoints")) allTimePoints = GSON.fromJson(data.get("allTimePoints"), new TypeToken<Map<String, Integer>>(){}.getType());
+            if (data.has("hiddenScoreboards")) hiddenScoreboards = GSON.fromJson(data.get("hiddenScoreboards"), new TypeToken<Set<String>>(){}.getType());
         } catch (Exception e) { FabricDashboardMod.LOGGER.error("Failed to load events data", e); }
+        if (activeEvents == null) activeEvents = new ArrayList<>();
+        if (playerPreferences == null) playerPreferences = new HashMap<>();
+        if (allTimePoints == null) allTimePoints = new HashMap<>();
+        if (hiddenScoreboards == null) hiddenScoreboards = new HashSet<>();
     }
 
     public void save() {
@@ -542,6 +646,7 @@ public class EventManager {
             data.add("activeEvents", GSON.toJsonTree(activeEvents));
             data.add("playerPreferences", GSON.toJsonTree(playerPreferences));
             data.add("allTimePoints", GSON.toJsonTree(allTimePoints));
+            data.add("hiddenScoreboards", GSON.toJsonTree(hiddenScoreboards));
             GSON.toJson(data, writer);
         } catch (IOException e) { FabricDashboardMod.LOGGER.error("Failed to save events data", e); }
     }
@@ -557,5 +662,35 @@ public class EventManager {
             allTimePoints.merge(sorted.get(i).getKey(), 3 - i, Integer::sum);
         }
         save();
+    }
+
+    private void broadcastEventResults(ServerEvent event) {
+        server.getPlayerManager().broadcast(Text.literal("§6[Event] §cEvent ended: §l" + event.title), false);
+
+        List<Map.Entry<String, Integer>> ranked = event.currentScores.entrySet().stream()
+            .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
+            .sorted(event.lowerIsBetter ? Map.Entry.comparingByValue() : Map.Entry.<String, Integer>comparingByValue().reversed())
+            .collect(Collectors.toList());
+
+        if (ranked.isEmpty()) {
+            server.getPlayerManager().broadcast(Text.literal("§7No qualifying scores recorded."), false);
+            return;
+        }
+
+        for (int i = 0; i < ranked.size(); i++) {
+            Map.Entry<String, Integer> entry = ranked.get(i);
+            String playerName = getPlayerName(entry.getKey());
+            int val = entry.getValue();
+            String scoreStr;
+            if (event.type.equals("playtime")) scoreStr = formatTime(val);
+            else if (event.type.equals("damage_dealt")) scoreStr = val + " ❤";
+            else scoreStr = String.valueOf(val);
+            int pointsAwarded = i < 3 ? (3 - i) : 0;
+            String pointsStr = pointsAwarded > 0 ? " §6(+" + pointsAwarded + " pts)" : "";
+            server.getPlayerManager().broadcast(
+                Text.literal("§e#" + (i + 1) + " §f" + playerName + " §7- §a" + scoreStr + pointsStr),
+                false
+            );
+        }
     }
 }

@@ -45,8 +45,11 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 
 ### 🎖️ Server Events & Competitions
 *   **Multiple Concurrent Events**: Run multiple competitions simultaneously (e.g., "Mega Mining Mayhem" and "Playtime Challenge").
-*   **Admin-Driven Events**: Create timed competitions using `/dashboard event create`. Supported types: `playtime`, `mob_kills`, `blocks_placed`, `blocks_mined`, `fewest_deaths`, `damage_dealt`, `player_kills`, `fish_caught`, and `daily_streak`.
+*   **Admin-Driven Events**: Create timed competitions using `/dashboard event create`. Supported types: `playtime`, `mob_kills`, `blocks_placed`, `blocks_mined`, `fewest_deaths`, `damage_dealt`, `player_kills`, `fish_caught`, `daily_streak`, `obsidian_placed`, and `obsidian_mined`.
 *   **Live Scoreboards**: Progress is tracked in real-time on a premium in-game sidebar. Each player can choose which event to track via `/dashboard event scoreboard`.
+    *   **Real-time Timer**: Displays time remaining directly on the sidebar.
+    *   **Sleek Layout**: Scores are right-aligned for better readability.
+    *   **Privacy Controls**: Players can hide/show their personal scoreboard.
 *   **Inverted Leaderboards**: Support for `fewest_deaths` where the lowest score wins, correctly sorted on the Minecraft sidebar.
 *   **Player Head Rendering**: Native rendering of player heads on the sidebar using a dynamic resource pack.
 *   **Web Leaderboard**: A dedicated "Events" tab on the dashboard with individual cards for each active event, live timers, and interactive leaderboards.
@@ -85,9 +88,11 @@ By default, the dashboard is accessible at `http://<your-server-ip>:8105`.
 | `/dashboard event create <type> <hours> <title>` | Start a new timed event. | OP (2) |
 | `/dashboard event stop [id]` | Stop a specific event (or the latest if no ID provided). | OP (2) |
 | `/dashboard event list` | List all active events and their IDs. | All |
-| `/dashboard event status [id]` | View details and remaining time for an event. | All |
+| `/dashboard event status [id]` | View details and remaining time for an event (optional ID for detailed top-10). | All |
 | `/dashboard event setlength <id> <hours>` | Update the duration of an active event. | OP (2) |
-| `/dashboard event scoreboard <id>` | Switch your personal sidebar to track a specific event. | All |
+| `/dashboard event scoreboard <id>` | Switch your personal sidebar to track a specific event (unhides if hidden). | All |
+| `/dashboard event scoreboard hide` | Hide your personal event sidebar. | All |
+| `/dashboard event scoreboard show` | Show your personal event sidebar. | All |
 | `/dashboard event clearpoints all [amount]` | Clear or reduce all-time points for all players. | OP (2) |
 | `/dashboard event clearpoints user <name> [amount]` | Clear or reduce all-time points for a specific player. | OP (2) |
 | `/dashboard reparse` | Force a full re-parse of all server logs to refresh activity data. | OP (2) |
