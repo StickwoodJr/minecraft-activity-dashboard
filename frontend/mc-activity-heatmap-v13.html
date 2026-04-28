@@ -108,6 +108,7 @@
         height: 12px;
         border-radius: 50%;
         display: inline-block;
+        flex-shrink: 0;
         cursor: pointer;
         transition: all var(--transition);
         position: relative;
@@ -160,7 +161,6 @@
         border: 5px solid transparent;
         border-right-color: var(--color-surface-2);
       }
-
       /* Heatmap + pie layout */
       .heatmap-section{display:grid;grid-template-columns:1fr;gap:var(--space-6);transition:grid-template-columns 320ms cubic-bezier(0.16,1,0.3,1);align-items:stretch;}
       .heatmap-section.panel-open{grid-template-columns:1fr 1fr;}
@@ -225,7 +225,7 @@
       .pie-legend{display:flex;flex-direction:column;gap:var(--space-2);margin-top:var(--space-3);}
       .pie-legend-item{display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs);
         padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); transition: all var(--transition);}
-      .pie-legend-item[onclick]:hover { background: var(--color-surface-dynamic); transform: translateX(4px); }
+      .pie-legend-item[onclick]:hover { background: var(--color-surface-dynamic); }
       .pie-legend-name{display:flex;align-items:center;gap:var(--space-2);color:var(--color-text-muted);}
       .pie-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
       .pie-legend-val{font-weight:500;color:var(--color-text);}
@@ -235,7 +235,7 @@
         padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
         transition: all var(--transition); cursor: pointer;
       }
-      .breakdown-row:hover { background: var(--color-surface-dynamic); transform: translateX(4px); }
+      .breakdown-row:hover { background: var(--color-surface-dynamic); }
 
       /* Player head images */
       .player-head{border-radius:var(--radius-sm);image-rendering:pixelated;vertical-align:middle;flex-shrink:0;}
@@ -866,7 +866,6 @@
       </div> <!-- end viewEvents -->
 
       <div id="viewLeaderboards" style="display:none; flex-direction:column; gap:var(--space-6);">
-        <p class="page-sub" id="pageSubLeaderboards" style="margin-top: 0; margin-bottom: calc(var(--space-2) * -1);">{{DASHBOARD_DESCRIPTION}}</p>
         <div class="card">
           <div style="display:flex; gap:var(--space-4); margin-bottom: var(--space-6);">
             <div class="custom-select" id="statSelectContainer" style="flex:1; margin-bottom: 0;">
@@ -1104,6 +1103,28 @@
         return `<img src="/faces/${encodeURIComponent(name)}.png" alt="${name}" width="${size}" height="${size}" class="player-head" loading="lazy" onerror="this.onerror=null;this.src='/faces/default_head.png'">`;
       }
 
+      function isPlayerOnline(name) {
+        return !!(liveState && Array.isArray(liveState.playerNames) && liveState.playerNames.includes(name));
+      }
+
+      function playerStatusDot(name, extraClass = '') {
+        const online = isPlayerOnline(name);
+        const label = online ? 'Online' : 'Offline';
+        return `<span class="status-dot ${online ? 'status-online' : 'status-offline'}${extraClass ? ' ' + extraClass : ''}" data-player-status="${name}" aria-label="${name} is ${label}"><span class="status-tooltip">${label}</span></span>`;
+      }
+
+      function updatePlayerStatusDots() {
+        document.querySelectorAll('[data-player-status]').forEach(dot => {
+          const name = dot.getAttribute('data-player-status');
+          const online = isPlayerOnline(name);
+          dot.classList.toggle('status-online', online);
+          dot.classList.toggle('status-offline', !online);
+          dot.setAttribute('aria-label', `${name} is ${online ? 'Online' : 'Offline'}`);
+          const tooltip = dot.querySelector('.status-tooltip');
+          if (tooltip) tooltip.textContent = online ? 'Online' : 'Offline';
+        });
+      }
+
       function playerColor(name) {
         return (PLAYER_META[name] && PLAYER_META[name].colorHex) || '#888';
       }
@@ -1200,10 +1221,11 @@
           </div>
           ${top3.map(([p,m],i) => `
           <div class="kpi">
-            <div class="kpi-label">${rankLabels[i]}</div>
-            <div class="kpi-value interactive" onclick="showPlayerDetails('${p}')" style="font-size:var(--text-sm);font-weight:700;display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;word-break:break-all;">
+            <div class="kpi-label" style="white-space:nowrap;font-size:14px;letter-spacing:.03em;">${rankLabels[i]}</div>
+            <div class="kpi-value interactive" onclick="showPlayerDetails('${p}')" style="font-size:var(--text-sm);font-weight:700;display:flex;align-items:center;gap:var(--space-2);flex-wrap:nowrap;min-width:0;width:100%;overflow:visible;">
               ${playerHead(p, 28)}
-              <span style="line-height:1">${p}</span>
+              <span style="line-height:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p}</span>
+              ${playerStatusDot(p)}
             </div>
             <div class="kpi-note">${fmtHours(m/60)} total</div>
           </div>`).join('')}
@@ -1228,7 +1250,6 @@
           const mnames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           const desc = `Combined playtime from join/leave events &middot; ${mnames[firstDate.getMonth()]} ${firstDate.getDate()} &ndash; ${mnames[lastDate.getMonth()]} ${lastDate.getDate()}, ${lastDate.getFullYear()}`;
           document.getElementById('pageSub').innerHTML = desc;
-          document.getElementById('pageSubLeaderboards').innerHTML = desc;
         } else {
           start = new Date(); start.setDate(1);
           end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
@@ -1395,7 +1416,7 @@
           }
         });
         document.getElementById('pieLegend').style.display = 'flex';
-        document.getElementById('pieLegend').innerHTML = sorted.map(([p,m])=>`<div class="pie-legend-item" onclick="showPlayerDetails('${p}')" style="cursor:pointer;"><span class="pie-legend-name">${playerHead(p, 24)} ${p}</span><span class="pie-legend-val">${fmtHours(m/60)}</span></div>`).join('');
+        document.getElementById('pieLegend').innerHTML = sorted.map(([p,m])=>`<div class="pie-legend-item" onclick="showPlayerDetails('${p}')" style="cursor:pointer;"><span class="pie-legend-name">${playerHead(p, 24)}<span>${p}</span>${playerStatusDot(p)}</span><span class="pie-legend-val">${fmtHours(m/60)}</span></div>`).join('');
       }
 
       function buildHourlyForDay(dateStr, animate=true) {
@@ -1486,7 +1507,7 @@
         container.innerHTML = `<div style="font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:var(--space-2);">${label} breakdown</div>` +
           players.map(({p, mins}) => {
             const totalMins = players.reduce((a,b)=>a+b.mins,0);
-            return `<div onclick="showPlayerDetails('${p}')" class="breakdown-row">${playerHead(p, 24)}<span style="font-size:var(--text-xs);color:var(--color-text-muted);width:90px;flex-shrink:0;">${p}</span><div style="flex:1;height:6px;border-radius:3px;background:var(--color-surface-dynamic);overflow:hidden;"><div style="height:100%;width:${Math.round((mins/totalMins)*100)}%;background:${playerColor(p)};"></div></div><span style="font-size:var(--text-xs);font-weight:600;width:48px;text-align:right;">${fmtHours(mins/60)}</span></div>`;
+            return `<div onclick="showPlayerDetails('${p}')" class="breakdown-row">${playerHead(p, 24)}<span style="font-size:var(--text-xs);color:var(--color-text-muted);min-width:130px;max-width:160px;flex-shrink:0;display:flex;align-items:center;gap:var(--space-2);overflow:visible;"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p}</span>${playerStatusDot(p)}</span><div style="flex:1;min-width:48px;height:6px;border-radius:3px;background:var(--color-surface-dynamic);overflow:hidden;"><div style="height:100%;width:${Math.round((mins/totalMins)*100)}%;background:${playerColor(p)};"></div></div><span style="font-size:var(--text-xs);font-weight:600;width:48px;text-align:right;">${fmtHours(mins/60)}</span></div>`;
           }).join('');
       }
 
@@ -1534,7 +1555,7 @@
           const sd=sessData[p]||{};
           const avgMin=sd.avg||0;
           return `<tr onclick="showPlayerDetails('${p}')">
-            <td><div style="display:flex;align-items:center;"><span style="display:inline-block;width:28px;">${i<3?`<span class="rank-badge ${rankClass[i]}">${i+1}</span>`:''}</span>${playerHead(p, 28)}<span style="margin-left:var(--space-2);font-weight:600;">${p}</span></div></td>
+            <td><div style="display:flex;align-items:center;"><span style="display:inline-block;width:28px;">${i<3?`<span class="rank-badge ${rankClass[i]}">${i+1}</span>`:''}</span>${playerHead(p, 28)}<span style="margin-left:var(--space-2);font-weight:600;">${p}</span><span style="margin-left:var(--space-2);">${playerStatusDot(p)}</span></div></td>
             <td class="${playerSortMode === 'total' ? 'sorted-column' : ''}">${(m/60).toFixed(1)}h</td>
             <td class="${playerSortMode === 'sessions' ? 'sorted-column' : ''}">${sd.sessions||'-'}</td>
             <td class="${playerSortMode === 'avg' ? 'sorted-column' : ''}">${avgMin<60?Math.round(avgMin)+'m':(avgMin/60).toFixed(1)+'h'}</td>
@@ -1717,7 +1738,7 @@
         body.innerHTML = sorted.map(([p, val], i) => `
           <tr onclick="showPlayerDetails('${p}')">
             <td><div style="display:flex; align-items:center; gap:var(--space-2);"><span style="display:inline-block; width:24px;">${i < 3 ? `<span class="rank-badge ${rankClass[i]}">${i + 1}</span>` : `<span style="margin-left:8px; color:var(--color-text-faint); font-weight:600;">${i + 1}</span>`}</span></div></td>
-            <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHead(p, 28)}<span style="font-weight:600;">${p}</span></div></td>
+            <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHead(p, 28)}<span style="font-weight:600;">${p}</span>${playerStatusDot(p)}</div></td>
             <td style="text-align: right; font-weight: 700; font-size: var(--text-base);">${val.toLocaleString()}${statConf.suffix}</td>
           </tr>`).join('');
       }
@@ -2530,7 +2551,7 @@
                 return `
                   <tr onclick="showPlayerDetails('${name}')">
                     <td><span class="rank-badge ${i < 3 ? rankClass[i] : ''}">${i + 1}</span></td>
-                    <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${name}</span></div></td>
+                    <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${name}</span>${playerStatusDot(name)}</div></td>
                     <td style="text-align: right; font-weight: 700;">${scoreDisplay}</td>
                   </tr>
                 `;
@@ -2627,7 +2648,7 @@
           allTimeBody.innerHTML = sortedAllTime.map(([uuid, pts], i) => `
             <tr onclick="showPlayerDetails('${getPlayerNameByUuid(uuid)}')">
               <td><span class="rank-badge ${i < 3 ? rankClass[i] : ''}">${i + 1}</span></td>
-              <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${getPlayerNameByUuid(uuid)}</span></div></td>
+              <td><div style="display:flex; align-items:center; gap:var(--space-3);">${playerHeadByUuid(uuid, 24)}<span style="font-weight:600;">${getPlayerNameByUuid(uuid)}</span>${playerStatusDot(getPlayerNameByUuid(uuid))}</div></td>
               <td style="text-align: right; font-weight: 700; color: var(--color-primary);">${pts.toLocaleString()} pts</td>
             </tr>
           `).join('');
@@ -2663,6 +2684,7 @@
           const data = await res.json();
           liveState = data;
           renderLive();
+          updatePlayerStatusDots();
         } catch (e) {
           console.error("[Live] Polling failed:", e);
           document.getElementById('liveLastUpdate').textContent = "Connection error: " + e.message;
