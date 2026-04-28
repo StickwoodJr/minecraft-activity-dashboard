@@ -16,6 +16,7 @@ import java.lang.management.OperatingSystemMXBean;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonWriter;
 
 import java.io.*;
 import java.net.InetSocketAddress;
@@ -24,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Embedded JDK HTTP server that powers the Minecraft Activity Dashboard.
@@ -44,10 +46,12 @@ public class DashboardWebServer {
     private final File leaderboardCacheFile;
     private final StatsAggregator statsAggregator;
     private final UuidCache uuidCache;
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
     private volatile LiveMetricsSnapshot liveSnapshot;
-    private long cachedWorldSizeMb = 0;
-    private long lastWorldSizeCheck = 0;
+    private volatile long cachedWorldSizeMb = 0;
+    private volatile long lastWorldSizeCheck = 0;
+    private static final long WORLD_SIZE_REFRESH_MS = 30L * 60L * 1000L;
+    private static final int WORLD_SIZE_MAX_DEPTH = 8;
 
     public static class LiveMetricsSnapshot {
         public final int playersOnline;
@@ -276,9 +280,11 @@ public class DashboardWebServer {
             double diskFreeGb = targetDir.getUsableSpace() / (1024.0 * 1024.0 * 1024.0);
             double diskUsedGb = diskTotalGb - diskFreeGb;
 
-            // World Size (Expensive, update every 10 minutes)
-            if (System.currentTimeMillis() - lastWorldSizeCheck > 600000) {
-                cachedWorldSizeMb = calculateDirectorySize(targetDir) / (1024 * 1024);
+            // World Size: bounded walk over the world dir only, refreshed every 30 minutes.
+            if (System.currentTimeMillis() - lastWorldSizeCheck > WORLD_SIZE_REFRESH_MS) {
+                File worldDir = new File(FabricLoader.getInstance().getGameDir().toFile(),
+                        DashboardConfig.get().stats_world_name);
+                cachedWorldSizeMb = calculateDirectorySize(worldDir) / (1024 * 1024);
                 lastWorldSizeCheck = System.currentTimeMillis();
             }
 
@@ -292,15 +298,30 @@ public class DashboardWebServer {
     }
 
     private long calculateDirectorySize(File directory) {
-        long length = 0;
-        File[] files = directory.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                if (file.isFile()) length += file.length();
-                else length += calculateDirectorySize(file);
-            }
+        if (directory == null || !directory.exists() || !directory.isDirectory()) return 0;
+        final long[] total = {0L};
+        try {
+            java.nio.file.Files.walkFileTree(
+                directory.toPath(),
+                java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class),
+                WORLD_SIZE_MAX_DEPTH,
+                new java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                    @Override
+                    public java.nio.file.FileVisitResult visitFile(java.nio.file.Path file,
+                            java.nio.file.attribute.BasicFileAttributes attrs) {
+                        if (attrs.isRegularFile()) total[0] += attrs.size();
+                        return java.nio.file.FileVisitResult.CONTINUE;
+                    }
+                    @Override
+                    public java.nio.file.FileVisitResult visitFileFailed(java.nio.file.Path file, IOException exc) {
+                        return java.nio.file.FileVisitResult.CONTINUE;
+                    }
+                }
+            );
+        } catch (IOException e) {
+            FabricDashboardMod.LOGGER.warn("World size walk failed: " + e.getMessage());
         }
-        return length;
+        return total[0];
     }
 
     /** Scans the cache file for all known player names and kicks off head fetches. */
@@ -675,30 +696,47 @@ public class DashboardWebServer {
                 exchange.sendResponseHeaders(405, -1);
                 return;
             }
-            
+
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
             exchange.getResponseHeaders().set("Pragma", "no-cache");
             exchange.getResponseHeaders().set("Expires", "0");
-            
+
+            boolean useGzip = clientAcceptsGzip(exchange);
+            if (useGzip) {
+                exchange.getResponseHeaders().set("Content-Encoding", "gzip");
+            }
+
             if (!cacheFile.exists()) {
-                String emptyJson = "{\"daily\":{},\"playerDailyRaw\":{},\"sessData\":{},\"hourly\":{}}";
-                exchange.sendResponseHeaders(200, emptyJson.length());
-                try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(emptyJson.getBytes());
+                exchange.sendResponseHeaders(200, 0);
+                try (OutputStream raw = exchange.getResponseBody();
+                     OutputStream out = useGzip ? new GZIPOutputStream(raw) : raw;
+                     Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+                     JsonWriter jw = new JsonWriter(w)) {
+                    jw.beginObject();
+                    jw.name("daily").beginObject().endObject();
+                    jw.name("playerDailyRaw").beginObject().endObject();
+                    jw.name("sessData").beginObject().endObject();
+                    jw.name("hourly").beginObject().endObject();
+                    jw.endObject();
                 }
                 return;
             }
 
+            JsonObject data;
             try (Reader reader = new FileReader(cacheFile)) {
-                JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
+                data = JsonParser.parseReader(reader).getAsJsonObject();
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.error("Failed to read cache for API activity", e);
+                exchange.sendResponseHeaders(500, -1);
+                return;
+            }
+
+            try {
                 List<String> ignored = DashboardConfig.get().ignored_players;
+                Set<String> ignoreSet = DashboardConfig.get().getIgnoredLowerNames();
 
                 if (ignored != null && !ignored.isEmpty()) {
-                    Set<String> ignoreSet = new HashSet<>();
-                    for (String s : ignored) ignoreSet.add(s.toLowerCase());
-
-                    // Filter sessData
                     if (data.has("sessData")) {
                         JsonObject sess = data.getAsJsonObject("sessData");
                         List<String> toRemove = new ArrayList<>();
@@ -708,7 +746,6 @@ public class DashboardWebServer {
                         for (String p : toRemove) sess.remove(p);
                     }
 
-                    // Filter playerDailyRaw and collect for daily recalculation
                     Map<String, Double> newDaily = new HashMap<>();
                     if (data.has("playerDailyRaw")) {
                         JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
@@ -719,7 +756,7 @@ public class DashboardWebServer {
                                 if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
                             }
                             for (String p : toRemove) dayMap.remove(p);
-                            
+
                             double sumMinutes = 0;
                             for (String p : dayMap.keySet()) {
                                 sumMinutes += dayMap.get(p).getAsDouble();
@@ -728,7 +765,6 @@ public class DashboardWebServer {
                         }
                     }
 
-                    // Filter hourly
                     if (data.has("hourly")) {
                         JsonObject hly = data.getAsJsonObject("hourly");
                         for (String date : hly.keySet()) {
@@ -741,21 +777,30 @@ public class DashboardWebServer {
                         }
                     }
 
-                    // Overwrite daily totals with filtered ones
                     data.add("daily", GSON.toJsonTree(newDaily));
-                    // Include the ignored list in the response for the frontend to be extra sure
                     data.add("ignored_players", GSON.toJsonTree(ignored));
                 }
 
-                byte[] json = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(200, json.length);
-                try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(json);
+                exchange.sendResponseHeaders(200, 0);
+                try (OutputStream raw = exchange.getResponseBody();
+                     OutputStream out = useGzip ? new GZIPOutputStream(raw) : raw;
+                     Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+                     JsonWriter jw = new JsonWriter(w)) {
+                    GSON.toJson(data, jw);
                 }
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to serve filtered API activity", e);
-                exchange.sendResponseHeaders(500, -1);
+                try { exchange.sendResponseHeaders(500, -1); } catch (IOException ignored) {}
             }
+        }
+
+        private static boolean clientAcceptsGzip(HttpExchange exchange) {
+            List<String> values = exchange.getRequestHeaders().get("Accept-Encoding");
+            if (values == null) return false;
+            for (String v : values) {
+                if (v != null && v.toLowerCase().contains("gzip")) return true;
+            }
+            return false;
         }
     }
 

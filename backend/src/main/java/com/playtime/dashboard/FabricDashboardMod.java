@@ -32,6 +32,8 @@ public class FabricDashboardMod implements ModInitializer {
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            com.playtime.dashboard.util.UuidCache.getInstance().registerPlayer(
+                handler.player.getUuid(), handler.player.getGameProfile().getName());
             StreakTracker.getInstance().onPlayerJoin(handler.player);
             EventManager.getInstance().onPlayerJoin(handler.player);
         });

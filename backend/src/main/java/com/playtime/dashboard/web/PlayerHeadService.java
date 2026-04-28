@@ -164,9 +164,9 @@ public class PlayerHeadService {
         return defaultHeadBytes;
     }
 
-    /** Returns the full color map (playerName → PlayerMeta). */
+    /** Returns an unmodifiable view of the meta map. The backing map is concurrent. */
     public Map<String, PlayerMeta> getColorMap() {
-        return new HashMap<>(metaMap);
+        return java.util.Collections.unmodifiableMap(metaMap);
     }
 
     /** Shutdown the background executor cleanly. */

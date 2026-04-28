@@ -136,39 +136,70 @@ public class LogParser {
         FabricDashboardMod.LOGGER.info("Historical parse complete. Parsed: " + parsedCount + ", Skipped: " + skippedCount + ". Total active days found: " + data.daily.size());
     }
 
+    /** Cap chunk read per incremental pass to avoid spike heap on a multi-megabyte tail. */
+    private static final long INCREMENTAL_MAX_READ_BYTES = 16L * 1024 * 1024;
+
     public void runIncrementalParse(File logsDir, File cacheFile) {
         File latestLog = new File(logsDir, "latest.log");
         if (!latestLog.exists()) return;
-        
+
         String dateStr = java.time.Instant.ofEpochMilli(latestLog.lastModified())
                 .atZone(java.time.ZoneId.systemDefault())
                 .toLocalDate()
                 .toString();
-                
-        if (latestLog.length() < lastByteOffset) {
+
+        long fileLen = latestLog.length();
+        if (fileLen < lastByteOffset) {
             lastByteOffset = 0;
             // activeSessions and incrementalLastTs are intentionally preserved across log rotations
         }
-        
-        DashboardData[] dataRef = new DashboardData[1];
-        
+        if (fileLen <= lastByteOffset) return;
+
+        long readLen = Math.min(fileLen - lastByteOffset, INCREMENTAL_MAX_READ_BYTES);
+        byte[] buffer = new byte[(int) readLen];
         try (RandomAccessFile raf = new RandomAccessFile(latestLog, "r")) {
             raf.seek(lastByteOffset);
-            
-            String line;
-            while ((line = raf.readLine()) != null) {
-                String utf8Line = new String(line.getBytes("ISO-8859-1"), StandardCharsets.UTF_8);
-                if (dataRef[0] == null && (utf8Line.contains("joined the game") || utf8Line.contains("left the game") || BOOT_PATTERN.matcher(utf8Line).find() || STOP_PATTERN.matcher(utf8Line).find())) {
-                    dataRef[0] = loadCache(cacheFile);
-                }
-                incrementalLastTs = processLine(utf8Line, dateStr, activeSessions, dataRef[0], incrementalLastTs);
-            }
-            lastByteOffset = raf.getFilePointer();
-            
+            raf.readFully(buffer);
         } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed incremental parse", e);
+            FabricDashboardMod.LOGGER.error("Failed incremental parse (read)", e);
+            return;
         }
-        
+
+        // Process up to the last complete line so we never decode mid-codepoint
+        // and so partial trailing lines get re-read on the next pass.
+        int lastNewline = -1;
+        for (int i = buffer.length - 1; i >= 0; i--) {
+            if (buffer[i] == '\n') { lastNewline = i; break; }
+        }
+        if (lastNewline < 0) return;
+
+        int processedLen = lastNewline + 1;
+        String chunk = new String(buffer, 0, processedLen, StandardCharsets.UTF_8);
+
+        DashboardData[] dataRef = new DashboardData[1];
+        int from = 0;
+        int len = chunk.length();
+        for (int i = 0; i < len; i++) {
+            if (chunk.charAt(i) == '\n') {
+                int end = i;
+                if (end > from && chunk.charAt(end - 1) == '\r') end--;
+                if (end > from) {
+                    String line = chunk.substring(from, end);
+                    if (dataRef[0] == null
+                            && (line.indexOf("joined the game") >= 0
+                                || line.indexOf("left the game") >= 0
+                                || BOOT_PATTERN.matcher(line).find()
+                                || STOP_PATTERN.matcher(line).find())) {
+                        dataRef[0] = loadCache(cacheFile);
+                    }
+                    incrementalLastTs = processLine(line, dateStr, activeSessions, dataRef[0], incrementalLastTs);
+                }
+                from = i + 1;
+            }
+        }
+
+        lastByteOffset += processedLen;
+
         if (dataRef[0] != null) {
             saveCache(cacheFile, dataRef[0]);
         }
@@ -180,7 +211,17 @@ public class LogParser {
         return null;
     }
 
+    private static boolean isInterestingLine(String line) {
+        return line.indexOf("joined the game") >= 0
+            || line.indexOf("left the game") >= 0
+            || line.indexOf("Stopping server") >= 0
+            || line.indexOf("Loading Minecraft") >= 0
+            || line.indexOf("Environment:") >= 0
+            || line.indexOf("Starting minecraft server version") >= 0;
+    }
+
     private LocalDateTime processLine(String line, String dateStr, Map<String, LocalDateTime> sessions, DashboardData data, LocalDateTime lastTimestamp) {
+        if (!isInterestingLine(line)) return lastTimestamp;
         Matcher timeMatch = LOG_PATTERN.matcher(line);
         if (!timeMatch.find()) return lastTimestamp;
         
@@ -267,28 +308,25 @@ public class LogParser {
             sData.longestSessionDate = startTs.toLocalDate().toString();
         }
 
-        // Distribute minutes to days/hours accurately
+        // Distribute minutes to days/hours accurately. Hoist map lookups to a single computeIfAbsent per segment.
         LocalDateTime current = startTs;
         while (current.isBefore(endTs)) {
             LocalDateTime nextHour = current.plusHours(1).withMinute(0).withSecond(0).withNano(0);
             LocalDateTime segmentEnd = endTs.isBefore(nextHour) ? endTs : nextHour;
             double segmentMinutes = ChronoUnit.SECONDS.between(current, segmentEnd) / 60.0;
-            
+
             String cDateStr = current.toLocalDate().toString();
             int hourIndex = current.getHour();
-            
-            // Daily
-            data.daily.put(cDateStr, data.daily.getOrDefault(cDateStr, 0.0) + segmentMinutes / 60.0);
-            
-            // Player Daily
-            data.playerDailyRaw.putIfAbsent(cDateStr, new HashMap<>());
-            data.playerDailyRaw.get(cDateStr).put(player, data.playerDailyRaw.get(cDateStr).getOrDefault(player, 0.0) + segmentMinutes);
-            
-            // Hourly
-            data.hourly.putIfAbsent(cDateStr, new HashMap<>());
-            data.hourly.get(cDateStr).putIfAbsent(player, new double[24]);
-            data.hourly.get(cDateStr).get(player)[hourIndex] += segmentMinutes;
-            
+
+            data.daily.merge(cDateStr, segmentMinutes / 60.0, Double::sum);
+
+            Map<String, Double> dailyForDate = data.playerDailyRaw.computeIfAbsent(cDateStr, k -> new HashMap<>());
+            dailyForDate.merge(player, segmentMinutes, Double::sum);
+
+            Map<String, double[]> hourlyForDate = data.hourly.computeIfAbsent(cDateStr, k -> new HashMap<>());
+            double[] hourArr = hourlyForDate.computeIfAbsent(player, k -> new double[24]);
+            hourArr[hourIndex] += segmentMinutes;
+
             current = segmentEnd;
         }
     }

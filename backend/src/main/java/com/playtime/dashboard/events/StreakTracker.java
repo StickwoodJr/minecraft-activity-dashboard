@@ -24,6 +24,22 @@ public class StreakTracker {
     private static StreakTracker instance;
     private final File cacheFile;
 
+    private static final class Snapshot {
+        final Map<String, PlayerStreakData> streaks;
+        final long fileMtime;
+        final LocalDate today;
+        final long computedNanos;
+
+        Snapshot(Map<String, PlayerStreakData> streaks, long fileMtime, LocalDate today, long computedNanos) {
+            this.streaks = streaks;
+            this.fileMtime = fileMtime;
+            this.today = today;
+            this.computedNanos = computedNanos;
+        }
+    }
+
+    private volatile Snapshot cachedSnapshot;
+
     private StreakTracker() {
         this.cacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_cache.json");
     }
@@ -36,9 +52,27 @@ public class StreakTracker {
     }
 
     public Map<String, PlayerStreakData> getStreaks() {
-        DashboardData data = loadCache();
         ZoneId zone = ZoneId.of(DashboardConfig.get().streak_timezone);
         LocalDate today = LocalDate.now(zone);
+        long fileMtime = cacheFile.exists() ? cacheFile.lastModified() : 0L;
+        long ttlNanos = Math.max(1, DashboardConfig.get().incremental_update_interval_minutes) * 60L * 1_000_000_000L;
+        long now = System.nanoTime();
+
+        Snapshot snap = cachedSnapshot;
+        if (snap != null
+                && snap.fileMtime == fileMtime
+                && snap.today.equals(today)
+                && (now - snap.computedNanos) < ttlNanos) {
+            return snap.streaks;
+        }
+
+        Map<String, PlayerStreakData> built = computeStreaks(today);
+        cachedSnapshot = new Snapshot(built, fileMtime, today, System.nanoTime());
+        return built;
+    }
+
+    private Map<String, PlayerStreakData> computeStreaks(LocalDate today) {
+        DashboardData data = loadCache();
         LocalDate yesterday = today.minusDays(1);
 
         Map<String, Map<LocalDate, Double>> playerDailyMinutes = new HashMap<>();
