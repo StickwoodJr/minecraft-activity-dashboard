@@ -55,7 +55,8 @@ public class StreakTracker {
         ZoneId zone = ZoneId.of(DashboardConfig.get().streak_timezone);
         LocalDate today = LocalDate.now(zone);
         long fileMtime = cacheFile.exists() ? cacheFile.lastModified() : 0L;
-        long ttlNanos = Math.max(1, DashboardConfig.get().incremental_update_interval_minutes) * 60L * 1_000_000_000L;
+        long ttlMinutes = DashboardConfig.get().getStreakCacheTtlMinutes();
+        long ttlNanos = Math.max(1, ttlMinutes) * 60L * 1_000_000_000L;
         long now = System.nanoTime();
 
         Snapshot snap = cachedSnapshot;
@@ -103,7 +104,8 @@ public class StreakTracker {
 
             Set<LocalDate> qualifyingDays = new HashSet<>();
             for (Map.Entry<LocalDate, Double> dayEntry : perDay.entrySet()) {
-                if (dayEntry.getValue() != null && dayEntry.getValue() >= 60.0) {
+                double minMins = DashboardConfig.get().streak_minimum_minutes_per_day;
+                if (dayEntry.getValue() != null && dayEntry.getValue() >= minMins) {
                     qualifyingDays.add(dayEntry.getKey());
                 }
             }
