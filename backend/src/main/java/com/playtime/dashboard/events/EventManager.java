@@ -109,6 +109,12 @@ public class EventManager {
                 .registerPlayer(player.getUuid(), player.getGameProfile().getName());
         }
         resolveObsidianRegistry();
+        
+        Path statsPath = getStatsPath();
+        if (!java.nio.file.Files.exists(statsPath)) {
+            FabricDashboardMod.LOGGER.warn("[Dashboard] Stats directory not found at: {}. Please check the 'stats_world_name' key in your dashboard-config.json.", statsPath.toAbsolutePath());
+        }
+
         updateScoreboard();
     }
 
@@ -272,7 +278,7 @@ public class EventManager {
     }
 
     private Path getStatsPath() {
-        return server.getRunDirectory().resolve("world/stats");
+        return server.getRunDirectory().resolve(DashboardConfig.get().stats_world_name).resolve("stats");
     }
 
     public void tick() {
