@@ -109,6 +109,7 @@ public class PlayerHeadService {
     /** Schedule a single player fetch if stale or missing. Deduplicated via inFlight set. */
     public void fetchIfNeeded(String playerName) {
         if (!DashboardConfig.get().fetch_player_heads) return;
+        if (DashboardConfig.get().isPlayerIgnored(playerName)) return;
         PlayerMeta existing = metaMap.get(playerName);
         if (existing != null) {
             // Force re-fetch if full skin file is missing (new feature migration)

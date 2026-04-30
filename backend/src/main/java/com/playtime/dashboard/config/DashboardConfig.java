@@ -70,6 +70,29 @@ public class DashboardConfig {
         return ignoredOfflineUuids;
     }
 
+    /**
+     * @return true if the player name is in the ignored list (case-insensitive).
+     */
+    public boolean isPlayerIgnored(String name) {
+        if (name == null) return false;
+        return ignoredLowerNames.contains(name.toLowerCase());
+    }
+
+    /**
+     * @return true if the UUID is in the ignored list (as an offline UUID).
+     */
+    public boolean isUuidIgnored(String uuid) {
+        if (uuid == null) return false;
+        return ignoredOfflineUuids.contains(uuid);
+    }
+
+    /**
+     * @return true if either the name or UUID matches the ignored list.
+     */
+    public boolean isIgnored(String name, String uuid) {
+        return isPlayerIgnored(name) || isUuidIgnored(uuid);
+    }
+
     public Map<String, String> getAliasesLower() {
         return aliasesLower;
     }

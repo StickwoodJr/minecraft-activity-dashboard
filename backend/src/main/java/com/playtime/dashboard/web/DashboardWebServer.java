@@ -570,7 +570,7 @@ public class DashboardWebServer {
             }
 
             // Sanitize player name — only allow word characters, slash, and hyphen
-            if (!playerName.matches("[\\w/\\-]+")) {
+            if (!playerName.matches("[\\w/\\-]+") || DashboardConfig.get().isPlayerIgnored(playerName)) {
                 exchange.sendResponseHeaders(400, -1);
                 return;
             }
@@ -637,7 +637,7 @@ public class DashboardWebServer {
             }
             String playerName = filename.substring(0, filename.length() - 4);
 
-            if (!playerName.matches("[\\w/\\-]+")) {
+            if (!playerName.matches("[\\w/\\-]+") || DashboardConfig.get().isPlayerIgnored(playerName)) {
                 exchange.sendResponseHeaders(400, -1);
                 return;
             }
@@ -684,7 +684,14 @@ public class DashboardWebServer {
             }
 
             Map<String, PlayerHeadService.PlayerMeta> metaMap = headService.getColorMap();
-            byte[] json = GSON.toJson(metaMap).getBytes(StandardCharsets.UTF_8);
+            DashboardConfig cfg = DashboardConfig.get();
+            Map<String, PlayerHeadService.PlayerMeta> filtered = new HashMap<>();
+            for (Map.Entry<String, PlayerHeadService.PlayerMeta> entry : metaMap.entrySet()) {
+                if (!cfg.isPlayerIgnored(entry.getKey())) {
+                    filtered.put(entry.getKey(), entry.getValue());
+                }
+            }
+            byte[] json = GSON.toJson(filtered).getBytes(StandardCharsets.UTF_8);
 
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -748,53 +755,50 @@ public class DashboardWebServer {
             }
 
             try {
-                List<String> ignored = DashboardConfig.get().ignored_players;
-                Set<String> ignoreSet = DashboardConfig.get().getIgnoredLowerNames();
+                DashboardConfig cfg = DashboardConfig.get();
 
-                if (ignored != null && !ignored.isEmpty()) {
-                    if (data.has("sessData")) {
-                        JsonObject sess = data.getAsJsonObject("sessData");
-                        List<String> toRemove = new ArrayList<>();
-                        for (String p : sess.keySet()) {
-                            if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
-                        }
-                        for (String p : toRemove) sess.remove(p);
+                if (data.has("sessData")) {
+                    JsonObject sess = data.getAsJsonObject("sessData");
+                    List<String> toRemove = new ArrayList<>();
+                    for (String p : sess.keySet()) {
+                        if (cfg.isPlayerIgnored(p)) toRemove.add(p);
                     }
-
-                    Map<String, Double> newDaily = new HashMap<>();
-                    if (data.has("playerDailyRaw")) {
-                        JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
-                        for (String date : pdr.keySet()) {
-                            JsonObject dayMap = pdr.getAsJsonObject(date);
-                            List<String> toRemove = new ArrayList<>();
-                            for (String p : dayMap.keySet()) {
-                                if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
-                            }
-                            for (String p : toRemove) dayMap.remove(p);
-
-                            double sumMinutes = 0;
-                            for (String p : dayMap.keySet()) {
-                                sumMinutes += dayMap.get(p).getAsDouble();
-                            }
-                            newDaily.put(date, Math.round((sumMinutes / 60.0) * 100.0) / 100.0);
-                        }
-                    }
-
-                    if (data.has("hourly")) {
-                        JsonObject hly = data.getAsJsonObject("hourly");
-                        for (String date : hly.keySet()) {
-                            JsonObject dayMap = hly.getAsJsonObject(date);
-                            List<String> toRemove = new ArrayList<>();
-                            for (String p : dayMap.keySet()) {
-                                if (ignoreSet.contains(p.toLowerCase())) toRemove.add(p);
-                            }
-                            for (String p : toRemove) dayMap.remove(p);
-                        }
-                    }
-
-                    data.add("daily", GSON.toJsonTree(newDaily));
-                    data.add("ignored_players", GSON.toJsonTree(ignored));
+                    for (String p : toRemove) sess.remove(p);
                 }
+
+                Map<String, Double> newDaily = new HashMap<>();
+                if (data.has("playerDailyRaw")) {
+                    JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
+                    for (String date : pdr.keySet()) {
+                        JsonObject dayMap = pdr.getAsJsonObject(date);
+                        List<String> toRemove = new ArrayList<>();
+                        for (String p : dayMap.keySet()) {
+                            if (cfg.isPlayerIgnored(p)) toRemove.add(p);
+                        }
+                        for (String p : toRemove) dayMap.remove(p);
+
+                        double sumMinutes = 0;
+                        for (String p : dayMap.keySet()) {
+                            sumMinutes += dayMap.get(p).getAsDouble();
+                        }
+                        newDaily.put(date, Math.round((sumMinutes / 60.0) * 100.0) / 100.0);
+                    }
+                }
+
+                if (data.has("hourly")) {
+                    JsonObject hly = data.getAsJsonObject("hourly");
+                    for (String date : hly.keySet()) {
+                        JsonObject dayMap = hly.getAsJsonObject(date);
+                        List<String> toRemove = new ArrayList<>();
+                        for (String p : dayMap.keySet()) {
+                            if (cfg.isPlayerIgnored(p)) toRemove.add(p);
+                        }
+                        for (String p : toRemove) dayMap.remove(p);
+                    }
+                }
+
+                data.add("daily", GSON.toJsonTree(newDaily));
+                data.add("ignored_players", GSON.toJsonTree(cfg.ignored_players));
 
                 exchange.sendResponseHeaders(200, 0);
                 try (OutputStream raw = exchange.getResponseBody();

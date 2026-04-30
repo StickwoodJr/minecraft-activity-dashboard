@@ -323,11 +323,7 @@ public class EventManager {
     private void updatePlayerScore(ServerEvent event, String uuidStr, int currentValue) {
         String name = getPlayerName(uuidStr);
         DashboardConfig cfg = DashboardConfig.get();
-        if (cfg.getIgnoredLowerNames().contains(name.toLowerCase())) {
-            event.currentScores.remove(uuidStr);
-            return;
-        }
-        if (cfg.getIgnoredOfflineUuids().contains(uuidStr)) {
+        if (cfg.isIgnored(name, uuidStr)) {
             event.currentScores.remove(uuidStr);
             return;
         }
