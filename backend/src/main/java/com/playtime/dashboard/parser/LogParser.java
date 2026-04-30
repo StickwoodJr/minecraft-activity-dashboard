@@ -221,37 +221,45 @@ public class LogParser {
     }
 
     private LocalDateTime processLine(String line, String dateStr, Map<String, LocalDateTime> sessions, DashboardData data, LocalDateTime lastTimestamp) {
-        if (!isInterestingLine(line)) return lastTimestamp;
         Matcher timeMatch = LOG_PATTERN.matcher(line);
-        if (!timeMatch.find()) return lastTimestamp;
-        
-        String timeStr = timeMatch.group(1);
-        LocalDateTime currentTs;
-        try {
-            currentTs = LocalDateTime.parse(dateStr + " " + timeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        } catch (DateTimeParseException e) {
-            return lastTimestamp;
+        LocalDateTime currentTs = lastTimestamp;
+        if (timeMatch.find()) {
+            String timeStr = timeMatch.group(1);
+            try {
+                currentTs = LocalDateTime.parse(dateStr + " " + timeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            } catch (DateTimeParseException e) {
+                // Keep currentTs as lastTimestamp if parsing fails
+            }
         }
 
+        if (!isInterestingLine(line)) return currentTs;
+
         // Reset sessions on server lifecycle events
-        if (BOOT_PATTERN.matcher(line).find() || STOP_PATTERN.matcher(line).find()) {
-            if (data != null) {
-                boolean isCrash = BOOT_PATTERN.matcher(line).find();
-                // For clean stops: credit time up to currentTs (the stop event).
-                // For crashes: cap ghost sessions at MAX_GHOST_SESSION_HOURS from join
-                // to avoid inflating stats when players were idle/offline during a crash.
-                final long MAX_GHOST_MINUTES = 4 * 60; // 4 hours
-                for (Map.Entry<String, LocalDateTime> entry : sessions.entrySet()) {
-                    LocalDateTime sessionStart = entry.getValue();
-                    LocalDateTime endTs;
-                    if (isCrash && sessionStart != null) {
-                        LocalDateTime cappedEnd = sessionStart.plusMinutes(MAX_GHOST_MINUTES);
-                        endTs = (currentTs != null && currentTs.isBefore(cappedEnd)) ? currentTs : cappedEnd;
+        boolean isBoot = BOOT_PATTERN.matcher(line).find();
+        boolean isStop = STOP_PATTERN.matcher(line).find();
+
+        if (isBoot || isStop) {
+            if (data != null && !sessions.isEmpty()) {
+                LocalDateTime endTs;
+                String logReason;
+                
+                if (isStop) {
+                    endTs = currentTs;
+                    logReason = "CLEAN STOP";
+                } else {
+                    // Unexpected boot / crash
+                    if (lastTimestamp != null) {
+                        endTs = lastTimestamp;
+                        logReason = "CRASH (closing at last known timestamp: " + lastTimestamp + ")";
                     } else {
-                        endTs = currentTs != null ? currentTs : sessionStart;
+                        endTs = currentTs;
+                        logReason = "CRASH (no previous timestamp, closing at boot: " + currentTs + ")";
                     }
-                    FabricDashboardMod.LOGGER.info("FORCE CLOSING ghost session for " + entry.getKey() + ". Start: " + sessionStart + ", End: " + endTs + (isCrash ? " [crash-capped]" : ""));
-                    closeSession(entry.getKey(), sessionStart, endTs, data);
+                }
+
+                for (Map.Entry<String, LocalDateTime> entry : sessions.entrySet()) {
+                    FabricDashboardMod.LOGGER.info("FORCE CLOSING ghost session for " + entry.getKey() + " [" + logReason + "]. Start: " + entry.getValue() + ", End: " + endTs);
+                    closeSession(entry.getKey(), entry.getValue(), endTs, data);
                 }
             }
             sessions.clear();
