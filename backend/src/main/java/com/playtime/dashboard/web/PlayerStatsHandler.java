@@ -45,6 +45,11 @@ public class PlayerStatsHandler implements HttpHandler {
             return;
         }
 
+        if (DashboardConfig.get().isPlayerIgnored(username)) {
+            sendError(exchange, 404, "Player not found");
+            return;
+        }
+
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         exchange.getResponseHeaders().set("Pragma", "no-cache");

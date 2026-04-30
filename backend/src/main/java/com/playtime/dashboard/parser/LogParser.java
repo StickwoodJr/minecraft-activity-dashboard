@@ -261,7 +261,7 @@ public class LogParser {
         Matcher joinMatch = JOIN_PATTERN.matcher(line);
         if (joinMatch.find()) {
             String player = normalizePlayer(joinMatch.group(1));
-            if (DashboardConfig.get().ignored_players.contains(player)) return currentTs;
+            if (DashboardConfig.get().isPlayerIgnored(player)) return currentTs;
             
             if (sessions.containsKey(player) && data != null) {
                 closeSession(player, sessions.get(player), currentTs, data);
@@ -273,7 +273,7 @@ public class LogParser {
         Matcher leaveMatch = LEAVE_PATTERN.matcher(line);
         if (leaveMatch.find()) {
             String player = normalizePlayer(leaveMatch.group(1));
-            if (DashboardConfig.get().ignored_players.contains(player)) return currentTs;
+            if (DashboardConfig.get().isPlayerIgnored(player)) return currentTs;
             
             if (sessions.containsKey(player)) {
                 if (data != null) {

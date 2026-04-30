@@ -66,6 +66,7 @@ public class StatsAggregator {
             String playerName = normalizePlayer(rawName, uuidStr);
             
             if (isUuidString(playerName)) continue;
+            if (com.playtime.dashboard.config.DashboardConfig.get().isIgnored(playerName, uuidStr)) continue;
 
             playerToUuid.putIfAbsent(playerName, uuidStr);
 

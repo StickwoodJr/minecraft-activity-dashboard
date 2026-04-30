@@ -97,6 +97,8 @@ public class StreakTracker {
         UuidCache.getInstance().refresh();
         for (Map.Entry<String, Map<LocalDate, Double>> playerEntry : playerDailyMinutes.entrySet()) {
             String player = playerEntry.getKey();
+            if (DashboardConfig.get().isPlayerIgnored(player)) continue;
+            
             Map<LocalDate, Double> perDay = playerEntry.getValue();
 
             Set<LocalDate> qualifyingDays = new HashSet<>();

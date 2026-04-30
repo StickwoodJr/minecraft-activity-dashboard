@@ -50,19 +50,15 @@ public class LeaderboardHandler implements HttpHandler {
 
         try (Reader reader = new FileReader(leaderboardCacheFile)) {
             JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
-            List<String> ignored = DashboardConfig.get().ignored_players;
+            DashboardConfig cfg = DashboardConfig.get();
 
-            if (ignored != null && !ignored.isEmpty()) {
-                Set<String> ignoreSet = new HashSet<>();
-                for (String s : ignored) ignoreSet.add(s.toLowerCase());
-
-                for (Map.Entry<String, com.google.gson.JsonElement> categoryEntry : data.entrySet()) {
+            for (Map.Entry<String, com.google.gson.JsonElement> categoryEntry : data.entrySet()) {
                     JsonObject categoryMap = categoryEntry.getValue().getAsJsonObject();
                     for (Map.Entry<String, com.google.gson.JsonElement> statEntry : categoryMap.entrySet()) {
                         JsonObject statMap = statEntry.getValue().getAsJsonObject();
                         Set<String> toRemove = new HashSet<>();
                         for (String p : statMap.keySet()) {
-                            if (ignoreSet.contains(p.toLowerCase())) {
+                            if (cfg.isPlayerIgnored(p)) {
                                 toRemove.add(p);
                             }
                         }
@@ -71,7 +67,6 @@ public class LeaderboardHandler implements HttpHandler {
                         }
                     }
                 }
-            }
 
             byte[] json = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, json.length);

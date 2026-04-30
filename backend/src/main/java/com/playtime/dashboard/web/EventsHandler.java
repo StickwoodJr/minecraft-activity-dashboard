@@ -28,13 +28,21 @@ public class EventsHandler implements HttpHandler {
         java.util.List<ServerEvent> activeEvents = manager.getActiveEvents();
         Map<String, Integer> allTime = manager.getAllTimePoints();
 
+        DashboardConfig cfg = DashboardConfig.get();
+        Map<String, Integer> allTimeFiltered = new HashMap<>();
+        for (Map.Entry<String, Integer> entry : allTime.entrySet()) {
+            if (!cfg.isIgnored(manager.resolvePlayerName(entry.getKey()), entry.getKey())) {
+                allTimeFiltered.put(entry.getKey(), entry.getValue());
+            }
+        }
+
         JsonObject response = new JsonObject();
-        Set<String> allUuids = new HashSet<>(allTime.keySet());
+        Set<String> allUuids = new HashSet<>(allTimeFiltered.keySet());
         response.add("activeEvents", GSON.toJsonTree(activeEvents));
         for (ServerEvent event : activeEvents) {
             allUuids.addAll(event.currentScores.keySet());
         }
-        response.add("allTimePoints", GSON.toJsonTree(allTime));
+        response.add("allTimePoints", GSON.toJsonTree(allTimeFiltered));
         response.add("streaks", GSON.toJsonTree(com.playtime.dashboard.events.StreakTracker.getInstance().getStreaks()));
         response.add("uuidToName", GSON.toJsonTree(manager.resolveNames(allUuids)));
 
