@@ -43,6 +43,8 @@ public class DashboardConfig {
     public String resource_pack_url = "http://149.56.155.7:8105/respack.zip"; // Sets resource-pack in server.properties if not empty
     public int max_concurrent_events = 3;
     public String streak_timezone = "America/Toronto";
+    public int streak_minimum_minutes_per_day = 60;
+    public int streak_cache_ttl_minutes = -1; // -1 means inherit incremental_update_interval_minutes
     public boolean allow_pvp_events = true;
 
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -60,6 +62,10 @@ public class DashboardConfig {
             load();
         }
         return instance;
+    }
+
+    public int getStreakCacheTtlMinutes() {
+        return streak_cache_ttl_minutes > 0 ? streak_cache_ttl_minutes : incremental_update_interval_minutes;
     }
 
     public Set<String> getIgnoredLowerNames() {
@@ -98,6 +104,14 @@ public class DashboardConfig {
     }
 
     private void recomputeDerived() {
+        // Validate timezone
+        try {
+            java.time.ZoneId.of(streak_timezone);
+        } catch (java.time.DateTimeException e) {
+            FabricDashboardMod.LOGGER.error("Invalid config key 'streak_timezone': {}. Falling back to UTC.", streak_timezone);
+            streak_timezone = "UTC";
+        }
+
         Set<String> names = new HashSet<>();
         Set<String> offlineUuids = new HashSet<>();
         if (ignored_players != null) {
