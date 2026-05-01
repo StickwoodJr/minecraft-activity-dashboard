@@ -63,7 +63,7 @@ public class FabricDashboardMod implements ModInitializer {
             if (webServer != null) {
                 webServer.stop();
             }
-            EventManager.getInstance().save();
+            EventManager.getInstance().shutdown();
         });
     }
 }
