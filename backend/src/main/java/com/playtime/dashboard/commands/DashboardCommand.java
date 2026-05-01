@@ -8,6 +8,7 @@ import com.playtime.dashboard.events.ServerEvent;
 import com.playtime.dashboard.web.DashboardWebServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.text.ClickEvent;
 import net.minecraft.text.Text;
 
 import java.util.List;
@@ -225,6 +226,44 @@ public class DashboardCommand {
                         })
                     )
                 )
+            )
+            .then(CommandManager.literal("debug")
+                .requires(source -> source.hasPermissionLevel(2))
+                .executes(context -> {
+                    EventManager mgr = EventManager.getInstance();
+
+                    // Snapshot values once so the copy payload matches what is displayed
+                    boolean dirty        = mgr.isDirty();
+                    int submitted        = mgr.getSaveSubmitCount();
+                    int completed        = mgr.getSaveCompleteCount();
+                    int activeEvents     = mgr.getActiveEvents().size();
+                    boolean execAlive    = !mgr.isExecutorShutdown();
+
+                    String copyPayload =
+                        "Dashboard Debug\n" +
+                        "Dirty flag: " + dirty + "\n" +
+                        "Save tasks submitted: " + submitted + "\n" +
+                        "Save tasks completed: " + completed + "\n" +
+                        "Active events: " + activeEvents + "\n" +
+                        "Executor alive: " + execAlive;
+
+                    Text copyButton = Text.literal(" §7[§bCopy§7]")
+                        .styled(s -> s
+                            .withClickEvent(new ClickEvent(
+                                ClickEvent.Action.COPY_TO_CLIPBOARD, copyPayload))
+                            .withHoverEvent(new net.minecraft.text.HoverEvent(
+                                net.minecraft.text.HoverEvent.Action.SHOW_TEXT,
+                                Text.literal("§7Click to copy debug info"))));
+
+                    context.getSource().sendMessage(
+                        Text.literal("§6--- Dashboard Debug ---").append(copyButton));
+                    context.getSource().sendMessage(Text.literal("§eDirty flag: §f" + dirty));
+                    context.getSource().sendMessage(Text.literal("§eSave tasks submitted: §f" + submitted));
+                    context.getSource().sendMessage(Text.literal("§eSave tasks completed: §f" + completed));
+                    context.getSource().sendMessage(Text.literal("§eActive events: §f" + activeEvents));
+                    context.getSource().sendMessage(Text.literal("§eExecutor alive: §f" + execAlive));
+                    return 1;
+                })
             )
             .then(CommandManager.literal("reload")
                 .requires(source -> source.hasPermissionLevel(2))

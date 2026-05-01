@@ -29,6 +29,13 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class EventManager {
@@ -66,11 +73,11 @@ public class EventManager {
     private final File eventsFile;
     private MinecraftServer server;
     
-    private List<ServerEvent> activeEvents = new ArrayList<>();
+    private List<ServerEvent> activeEvents = new CopyOnWriteArrayList<>();
     private Map<String, String> playerPreferences = new HashMap<>(); // UUID -> eventId
-    private Map<String, Integer> allTimePoints = new HashMap<>();
+    private Map<String, Integer> allTimePoints = new ConcurrentHashMap<>();
     private Map<String, Set<UUID>> syncedObjectives = new HashMap<>(); // objName -> set of player UUIDs
-    private Set<String> hiddenScoreboards = new HashSet<>(); // UUIDs of players who hid the sidebar
+    private Set<String> hiddenScoreboards = ConcurrentHashMap.newKeySet(); // UUIDs of players who hid the sidebar
 
     private static final Identifier HEADS_FONT_ID = Identifier.of("dashboard", "heads");
     private static final net.minecraft.text.Style HEADS_STYLE = net.minecraft.text.Style.EMPTY.withFont(HEADS_FONT_ID);
@@ -82,6 +89,36 @@ public class EventManager {
 
     /** Per-player cache of the last sent (objective, holder -> score) so we can skip unchanged updates. */
     private final Map<UUID, ScoreboardSendState> lastSent = new HashMap<>();
+
+    private final AtomicBoolean dirty = new AtomicBoolean(false);
+    private final AtomicInteger saveSubmitCount = new AtomicInteger(0);
+    private final AtomicInteger saveCompleteCount = new AtomicInteger(0);
+
+    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "EventManager-Save-Worker");
+        t.setDaemon(true);
+        return t;
+    });
+
+    private void markDirty() {
+        this.dirty.set(true);
+    }
+
+    public boolean isDirty() {
+        return dirty.get();
+    }
+
+    public int getSaveSubmitCount() {
+        return saveSubmitCount.get();
+    }
+
+    public int getSaveCompleteCount() {
+        return saveCompleteCount.get();
+    }
+
+    public boolean isExecutorShutdown() {
+        return executor.isShutdown();
+    }
 
     private static final class ScoreboardSendState {
         String objectiveName;
@@ -177,6 +214,7 @@ public class EventManager {
 
         activeEvents.add(event);
         takeStatsSnapshot(event);
+        markDirty();
         save();
         
         List<String> onlineNames = server.getPlayerManager().getPlayerList().stream()
@@ -247,6 +285,7 @@ public class EventManager {
         }
 
         lastSent.clear();
+        markDirty();
         save();
         updateScoreboard();
     }
@@ -292,6 +331,7 @@ public class EventManager {
         }
         for (String id : toStop) stopEvent(id);
         updateScoreboard();
+        save();
     }
 
     private void updateScores(ServerEvent event) {
@@ -335,7 +375,12 @@ public class EventManager {
         else if (event.type.equals("damage_dealt")) score /= 10;
         else if (event.type.equals("daily_streak")) score = currentValue;
         
-        if (score >= 0 || event.lowerIsBetter) event.currentScores.put(uuidStr, score);
+        if (score >= 0 || event.lowerIsBetter) {
+            Integer oldScore = event.currentScores.put(uuidStr, score);
+            if (oldScore == null || oldScore != score) {
+                markDirty();
+            }
+        }
     }
 
     private int getStatValueFromPlayer(ServerPlayerEntity player, String type) {
@@ -645,6 +690,7 @@ public class EventManager {
     public void setPlayerScoreboardPreference(UUID uuid, String eventId) {
         playerPreferences.put(uuid.toString(), eventId);
         lastSent.remove(uuid);
+        markDirty();
         save();
         updateScoreboard();
     }
@@ -654,6 +700,7 @@ public class EventManager {
         if (hidden) hiddenScoreboards.add(uuidStr);
         else hiddenScoreboards.remove(uuidStr);
         lastSent.remove(uuid);
+        markDirty();
         save();
         updateScoreboard();
     }
@@ -665,6 +712,7 @@ public class EventManager {
     public void clearAllPoints(int amount) {
         if (amount <= 0) allTimePoints.clear();
         else allTimePoints.replaceAll((u, p) -> Math.max(0, p - amount));
+        markDirty();
         save();
     }
 
@@ -678,6 +726,7 @@ public class EventManager {
         }
         if (amount <= 0) allTimePoints.remove(uuidStr);
         else allTimePoints.computeIfPresent(uuidStr, (k, v) -> Math.max(0, v - amount));
+        markDirty();
         save();
     }
 
@@ -720,18 +769,49 @@ public class EventManager {
         if (!eventsFile.exists()) return;
         try (FileReader reader = new FileReader(eventsFile)) {
             JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
-            if (data.has("activeEvents")) activeEvents = GSON.fromJson(data.get("activeEvents"), new TypeToken<List<ServerEvent>>(){}.getType());
-            if (data.has("playerPreferences")) playerPreferences = GSON.fromJson(data.get("playerPreferences"), new TypeToken<Map<String, String>>(){}.getType());
-            if (data.has("allTimePoints")) allTimePoints = GSON.fromJson(data.get("allTimePoints"), new TypeToken<Map<String, Integer>>(){}.getType());
-            if (data.has("hiddenScoreboards")) hiddenScoreboards = GSON.fromJson(data.get("hiddenScoreboards"), new TypeToken<Set<String>>(){}.getType());
+            if (data.has("activeEvents")) {
+                List<ServerEvent> loaded = GSON.fromJson(data.get("activeEvents"), new TypeToken<List<ServerEvent>>(){}.getType());
+                if (loaded != null) activeEvents = new CopyOnWriteArrayList<>(loaded);
+            }
+            if (data.has("playerPreferences")) {
+                Map<String, String> loaded = GSON.fromJson(data.get("playerPreferences"), new TypeToken<Map<String, String>>(){}.getType());
+                if (loaded != null) playerPreferences = new HashMap<>(loaded);
+            }
+            if (data.has("allTimePoints")) {
+                Map<String, Integer> loaded = GSON.fromJson(data.get("allTimePoints"), new TypeToken<Map<String, Integer>>(){}.getType());
+                if (loaded != null) allTimePoints = new ConcurrentHashMap<>(loaded);
+            }
+            if (data.has("hiddenScoreboards")) {
+                Set<String> loaded = GSON.fromJson(data.get("hiddenScoreboards"), new TypeToken<Set<String>>(){}.getType());
+                if (loaded != null) {
+                    hiddenScoreboards = ConcurrentHashMap.newKeySet();
+                    hiddenScoreboards.addAll(loaded);
+                }
+            }
         } catch (Exception e) { FabricDashboardMod.LOGGER.error("Failed to load events data", e); }
-        if (activeEvents == null) activeEvents = new ArrayList<>();
+        if (activeEvents == null) activeEvents = new CopyOnWriteArrayList<>();
         if (playerPreferences == null) playerPreferences = new HashMap<>();
-        if (allTimePoints == null) allTimePoints = new HashMap<>();
-        if (hiddenScoreboards == null) hiddenScoreboards = new HashSet<>();
+        if (allTimePoints == null) allTimePoints = new ConcurrentHashMap<>();
+        if (syncedObjectives == null) syncedObjectives = new HashMap<>();
+        if (hiddenScoreboards == null) hiddenScoreboards = ConcurrentHashMap.newKeySet();
     }
 
     public void save() {
+        if (dirty.compareAndSet(true, false)) {
+            // Snapshot on server thread while state is consistent
+            List<ServerEvent> eventSnap = activeEvents.stream()
+                .map(ServerEvent::snapshot)
+                .collect(Collectors.toList());
+            Map<String, String> prefSnap = new HashMap<>(playerPreferences);
+            Map<String, Integer> pointsSnap = new HashMap<>(allTimePoints);
+            Set<String> hiddenSnap = new HashSet<>(hiddenScoreboards);
+
+            saveSubmitCount.incrementAndGet();
+            executor.submit(() -> performSave(eventSnap, prefSnap, pointsSnap, hiddenSnap));
+        }
+    }
+
+    private synchronized void performSave(List<ServerEvent> activeEvents, Map<String, String> playerPreferences, Map<String, Integer> allTimePoints, Set<String> hiddenScoreboards) {
         try (FileWriter writer = new FileWriter(eventsFile)) {
             JsonObject data = new JsonObject();
             data.add("activeEvents", GSON.toJsonTree(activeEvents));
@@ -739,7 +819,27 @@ public class EventManager {
             data.add("allTimePoints", GSON.toJsonTree(allTimePoints));
             data.add("hiddenScoreboards", GSON.toJsonTree(hiddenScoreboards));
             GSON.toJson(data, writer);
+            saveCompleteCount.incrementAndGet();
+            FabricDashboardMod.LOGGER.info("[Dashboard] Save #{} complete — {} events, {} points entries",
+                saveCompleteCount.get(), activeEvents.size(), allTimePoints.size());
         } catch (IOException e) { FabricDashboardMod.LOGGER.error("Failed to save events data", e); }
+    }
+
+    public void shutdown() {
+        FabricDashboardMod.LOGGER.info("[Dashboard] shutdown() called — flushing final save");
+        save();
+        executor.shutdown();
+        try {
+            boolean finished = executor.awaitTermination(30, TimeUnit.SECONDS);
+            if (finished) {
+                FabricDashboardMod.LOGGER.info("[Dashboard] shutdown() complete — executor finished cleanly");
+            } else {
+                FabricDashboardMod.LOGGER.warn("[Dashboard] shutdown() timed out after 30s — file may be incomplete!");
+            }
+        } catch (InterruptedException e) {
+            FabricDashboardMod.LOGGER.error("[Dashboard] shutdown() interrupted — final save may be lost!", e);
+            Thread.currentThread().interrupt();
+        }
     }
 
     private boolean isUUID(String s) { return s != null && s.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"); }
@@ -752,6 +852,7 @@ public class EventManager {
         for (int i = 0; i < Math.min(sorted.size(), 3); i++) {
             allTimePoints.merge(sorted.get(i).getKey(), 3 - i, Integer::sum);
         }
+        markDirty();
         save();
     }
 
