@@ -1,8 +1,9 @@
 package com.playtime.dashboard.web;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.JsonElement;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
 import com.playtime.dashboard.FabricDashboardMod;
 import com.playtime.dashboard.config.DashboardConfig;
 import com.sun.net.httpserver.HttpExchange;
@@ -11,12 +12,9 @@ import com.sun.net.httpserver.HttpHandler;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.Reader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 public class LeaderboardHandler implements HttpHandler {
@@ -34,48 +32,86 @@ public class LeaderboardHandler implements HttpHandler {
             return;
         }
 
+        // 1. ETag Support
+        long lastModified = leaderboardCacheFile.exists() ? leaderboardCacheFile.lastModified() : 0;
+        String etag = "\"" + lastModified + "\"";
+        String ifNoneMatch = exchange.getRequestHeaders().getFirst("If-None-Match");
+
+        if (lastModified > 0 && etag.equals(ifNoneMatch)) {
+            exchange.sendResponseHeaders(304, -1);
+            return;
+        }
+
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        exchange.getResponseHeaders().set("Pragma", "no-cache");
-        exchange.getResponseHeaders().set("Expires", "0");
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+        exchange.getResponseHeaders().set("ETag", etag);
 
         if (!leaderboardCacheFile.exists()) {
             String emptyJson = "{}";
             exchange.sendResponseHeaders(200, emptyJson.length());
-            try (OutputStream os = exchange.getResponseBody()) {
+            try (var os = exchange.getResponseBody()) {
                 os.write(emptyJson.getBytes(StandardCharsets.UTF_8));
             }
             return;
         }
 
-        try (Reader reader = new FileReader(leaderboardCacheFile)) {
-            JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
-            DashboardConfig cfg = DashboardConfig.get();
+        // 2. Pre-fetch ignored players set (pre-computed in DashboardConfig)
+        Set<String> ignoredPlayers = DashboardConfig.get().getIgnoredLowerNames();
 
-            for (Map.Entry<String, com.google.gson.JsonElement> categoryEntry : data.entrySet()) {
-                    JsonObject categoryMap = categoryEntry.getValue().getAsJsonObject();
-                    for (Map.Entry<String, com.google.gson.JsonElement> statEntry : categoryMap.entrySet()) {
-                        JsonObject statMap = statEntry.getValue().getAsJsonObject();
-                        Set<String> toRemove = new HashSet<>();
-                        for (String p : statMap.keySet()) {
-                            if (cfg.isPlayerIgnored(p)) {
-                                toRemove.add(p);
-                            }
-                        }
-                        for (String p : toRemove) {
-                            statMap.remove(p);
-                        }
+        // 3. Streaming JsonReader -> JsonWriter
+        exchange.sendResponseHeaders(200, 0); // Chunked encoding
+        try (JsonReader reader = new JsonReader(new FileReader(leaderboardCacheFile));
+             Writer osw = new OutputStreamWriter(exchange.getResponseBody(), StandardCharsets.UTF_8);
+             JsonWriter writer = new JsonWriter(osw)) {
+            
+            streamLeaderboards(reader, writer, ignoredPlayers);
+        } catch (Exception e) {
+            FabricDashboardMod.LOGGER.error("Failed to stream leaderboards", e);
+            // We can't send 500 here if we already sent 200/chunked headers
+        }
+    }
+
+    private void streamLeaderboards(JsonReader reader, JsonWriter writer, Set<String> ignoredPlayers) throws IOException {
+        reader.beginObject();
+        writer.beginObject();
+
+        while (reader.hasNext()) {
+            String category = reader.nextName();
+            writer.name(category);
+
+            reader.beginObject();
+            writer.beginObject();
+
+            while (reader.hasNext()) {
+                String stat = reader.nextName();
+                writer.name(stat);
+
+                reader.beginObject();
+                writer.beginObject();
+
+                while (reader.hasNext()) {
+                    String player = reader.nextName();
+                    // Check ignored set directly (case-insensitive via lowercase keys)
+                    if (ignoredPlayers.contains(player.toLowerCase())) {
+                        reader.skipValue();
+                    } else {
+                        writer.name(player);
+                        // Stream the value (usually a number)
+                        JsonElement value = GSON.fromJson(reader, JsonElement.class);
+                        GSON.toJson(value, writer);
                     }
                 }
 
-            byte[] json = GSON.toJson(data).getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, json.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(json);
+                reader.endObject();
+                writer.endObject();
             }
-        } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed to serve leaderboards", e);
-            exchange.sendResponseHeaders(500, -1);
+
+            reader.endObject();
+            writer.endObject();
         }
+
+        reader.endObject();
+        writer.endObject();
     }
 }
+
