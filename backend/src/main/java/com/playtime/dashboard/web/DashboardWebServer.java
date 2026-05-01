@@ -730,7 +730,7 @@ public class DashboardWebServer {
             long currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
             int currentIgnoredHash = cfg.ignored_players != null ? cfg.ignored_players.hashCode() : 0;
 
-            // 1. Check if we can serve from memory cache
+            // 1. Fast path: check memory cache before locking
             if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentIgnoredHash == lastIgnoredHash && cachedResponse != null) {
                 String ifNoneMatch = exchange.getRequestHeaders().getFirst("If-None-Match");
                 if (cachedEtag != null && cachedEtag.equals(ifNoneMatch)) {
@@ -741,17 +741,26 @@ public class DashboardWebServer {
                 return;
             }
 
-            // 2. Refresh cache (or serve empty if no file)
-            refreshAndServe(exchange, currentLastMod, currentIgnoredHash, cfg);
-        }
-
-        private synchronized void refreshAndServe(HttpExchange exchange, long currentLastMod, int currentIgnoredHash, DashboardConfig cfg) throws IOException {
-            // Double-check under lock
-            if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentIgnoredHash == lastIgnoredHash && cachedResponse != null) {
-                serveCached(exchange, cachedResponse, cachedEtag);
-                return;
+            // 2. Slow path: Refresh cache with double-checked locking
+            synchronized (this) {
+                // Re-fetch lastModified under lock to ensure we don't race with a file write/rename
+                currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
+                
+                if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentIgnoredHash == lastIgnoredHash && cachedResponse != null) {
+                    // Cache was refreshed by another thread while we were waiting for the lock
+                } else {
+                    refreshCache(currentLastMod, currentIgnoredHash, cfg);
+                }
             }
 
+            if (cachedResponse != null) {
+                serveCached(exchange, cachedResponse, cachedEtag);
+            } else {
+                exchange.sendResponseHeaders(500, -1);
+            }
+        }
+
+        private void refreshCache(long currentLastMod, int currentIgnoredHash, DashboardConfig cfg) throws IOException {
             if (!cacheFile.exists()) {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 try (Writer w = new OutputStreamWriter(baos, StandardCharsets.UTF_8);
@@ -765,7 +774,6 @@ public class DashboardWebServer {
                     jw.endObject();
                 }
                 updateCache(baos.toByteArray(), "\"0\"", 0, currentIgnoredHash);
-                serveCached(exchange, cachedResponse, cachedEtag);
                 return;
             }
 
@@ -797,7 +805,7 @@ public class DashboardWebServer {
                     }
                 }
                 
-                // Add computed summary stats and metadata
+                // Append computed summary stats and metadata at the end of the object
                 writer.name("daily");
                 GSON.toJson(newDaily, Map.class, writer);
                 
@@ -807,12 +815,12 @@ public class DashboardWebServer {
                 writer.endObject();
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to refresh API activity cache", e);
-                exchange.sendResponseHeaders(500, -1);
-                return;
+                // We do NOT update the cache on failure, so concurrent requests will try again
+                // or fallback to whatever was there before if we didn't clear it.
+                throw new IOException("Cache refresh failed", e);
             }
 
             updateCache(baos.toByteArray(), "\"" + currentLastMod + "\"", currentLastMod, currentIgnoredHash);
-            serveCached(exchange, cachedResponse, cachedEtag);
         }
 
         private void updateCache(byte[] data, String etag, long lastMod, int ignoredHash) {
