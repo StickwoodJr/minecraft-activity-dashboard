@@ -14,8 +14,10 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
 import java.io.*;
@@ -707,6 +709,11 @@ public class DashboardWebServer {
     private static class ApiHandler implements HttpHandler {
         private final File cacheFile;
         private static final Gson GSON = new Gson();
+        
+        private volatile byte[] cachedResponse;
+        private volatile String cachedEtag;
+        private volatile long lastModifiedSeen = -1;
+        private volatile int lastIgnoredHash = 0;
 
         public ApiHandler(File cacheFile) {
             this.cacheFile = cacheFile;
@@ -719,97 +726,197 @@ public class DashboardWebServer {
                 return;
             }
 
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-            exchange.getResponseHeaders().set("Pragma", "no-cache");
-            exchange.getResponseHeaders().set("Expires", "0");
+            DashboardConfig cfg = DashboardConfig.get();
+            long currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
+            int currentIgnoredHash = cfg.ignored_players != null ? cfg.ignored_players.hashCode() : 0;
 
-            boolean useGzip = clientAcceptsGzip(exchange);
-            if (useGzip) {
-                exchange.getResponseHeaders().set("Content-Encoding", "gzip");
+            // 1. Fast path: check memory cache before locking
+            if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentIgnoredHash == lastIgnoredHash && cachedResponse != null) {
+                String ifNoneMatch = exchange.getRequestHeaders().getFirst("If-None-Match");
+                if (cachedEtag != null && cachedEtag.equals(ifNoneMatch)) {
+                    exchange.sendResponseHeaders(304, -1);
+                    return;
+                }
+                serveCached(exchange, cachedResponse, cachedEtag);
+                return;
             }
 
+            // 2. Slow path: Refresh cache with double-checked locking
+            synchronized (this) {
+                // Re-fetch lastModified under lock to ensure we don't race with a file write/rename
+                currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
+                
+                if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentIgnoredHash == lastIgnoredHash && cachedResponse != null) {
+                    // Cache was refreshed by another thread while we were waiting for the lock
+                } else {
+                    refreshCache(currentLastMod, currentIgnoredHash, cfg);
+                }
+            }
+
+            if (cachedResponse != null) {
+                serveCached(exchange, cachedResponse, cachedEtag);
+            } else {
+                exchange.sendResponseHeaders(500, -1);
+            }
+        }
+
+        private void refreshCache(long currentLastMod, int currentIgnoredHash, DashboardConfig cfg) throws IOException {
             if (!cacheFile.exists()) {
-                exchange.sendResponseHeaders(200, 0);
-                try (OutputStream raw = exchange.getResponseBody();
-                     OutputStream out = useGzip ? new GZIPOutputStream(raw) : raw;
-                     Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                try (Writer w = new OutputStreamWriter(baos, StandardCharsets.UTF_8);
                      JsonWriter jw = new JsonWriter(w)) {
                     jw.beginObject();
                     jw.name("daily").beginObject().endObject();
                     jw.name("playerDailyRaw").beginObject().endObject();
                     jw.name("sessData").beginObject().endObject();
                     jw.name("hourly").beginObject().endObject();
+                    jw.name("ignored_players").beginArray().endArray();
                     jw.endObject();
                 }
+                updateCache(baos.toByteArray(), "\"0\"", 0, currentIgnoredHash);
                 return;
             }
 
-            JsonObject data;
-            try (Reader reader = new FileReader(cacheFile)) {
-                data = JsonParser.parseReader(reader).getAsJsonObject();
+            // Streaming refresh into a memory buffer
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            Map<String, Double> newDaily = new HashMap<>();
+            Set<String> ignored = cfg.getIgnoredLowerNames();
+
+            try (JsonReader reader = new JsonReader(new FileReader(cacheFile));
+                 Writer w = new OutputStreamWriter(baos, StandardCharsets.UTF_8);
+                 JsonWriter writer = new JsonWriter(w)) {
+                
+                reader.beginObject();
+                writer.beginObject();
+                
+                while (reader.hasNext()) {
+                    String name = reader.nextName();
+                    if ("sessData".equals(name)) {
+                        writer.name("sessData");
+                        streamFilteredObject(reader, writer, ignored);
+                    } else if ("playerDailyRaw".equals(name)) {
+                        writer.name("playerDailyRaw");
+                        streamFilteredDailyRaw(reader, writer, ignored, newDaily);
+                    } else if ("hourly".equals(name)) {
+                        writer.name("hourly");
+                        streamFilteredHourly(reader, writer, ignored);
+                    } else {
+                        reader.skipValue();
+                    }
+                }
+                
+                // Append computed summary stats and metadata at the end of the object
+                writer.name("daily");
+                GSON.toJson(newDaily, Map.class, writer);
+                
+                writer.name("ignored_players");
+                GSON.toJson(cfg.ignored_players, List.class, writer);
+                
+                writer.endObject();
             } catch (Exception e) {
-                FabricDashboardMod.LOGGER.error("Failed to read cache for API activity", e);
-                exchange.sendResponseHeaders(500, -1);
-                return;
+                FabricDashboardMod.LOGGER.error("Failed to refresh API activity cache", e);
+                // We do NOT update the cache on failure, so concurrent requests will try again
+                // or fallback to whatever was there before if we didn't clear it.
+                throw new IOException("Cache refresh failed", e);
             }
 
-            try {
-                DashboardConfig cfg = DashboardConfig.get();
+            updateCache(baos.toByteArray(), "\"" + currentLastMod + "\"", currentLastMod, currentIgnoredHash);
+        }
 
-                if (data.has("sessData")) {
-                    JsonObject sess = data.getAsJsonObject("sessData");
-                    List<String> toRemove = new ArrayList<>();
-                    for (String p : sess.keySet()) {
-                        if (cfg.isPlayerIgnored(p)) toRemove.add(p);
-                    }
-                    for (String p : toRemove) sess.remove(p);
+        private void updateCache(byte[] data, String etag, long lastMod, int ignoredHash) {
+            this.cachedResponse = data;
+            this.cachedEtag = etag;
+            this.lastModifiedSeen = lastMod;
+            this.lastIgnoredHash = ignoredHash;
+        }
+
+        private void streamFilteredObject(JsonReader reader, JsonWriter writer, Set<String> ignored) throws IOException {
+            reader.beginObject();
+            writer.beginObject();
+            while (reader.hasNext()) {
+                String player = reader.nextName();
+                if (ignored.contains(player.toLowerCase())) {
+                    reader.skipValue();
+                } else {
+                    writer.name(player);
+                    // Copy value object without full tree parse
+                    JsonElement val = GSON.fromJson(reader, JsonElement.class);
+                    GSON.toJson(val, writer);
                 }
+            }
+            reader.endObject();
+            writer.endObject();
+        }
 
-                Map<String, Double> newDaily = new HashMap<>();
-                if (data.has("playerDailyRaw")) {
-                    JsonObject pdr = data.getAsJsonObject("playerDailyRaw");
-                    for (String date : pdr.keySet()) {
-                        JsonObject dayMap = pdr.getAsJsonObject(date);
-                        List<String> toRemove = new ArrayList<>();
-                        for (String p : dayMap.keySet()) {
-                            if (cfg.isPlayerIgnored(p)) toRemove.add(p);
-                        }
-                        for (String p : toRemove) dayMap.remove(p);
-
-                        double sumMinutes = 0;
-                        for (String p : dayMap.keySet()) {
-                            sumMinutes += dayMap.get(p).getAsDouble();
-                        }
-                        newDaily.put(date, Math.round((sumMinutes / 60.0) * 100.0) / 100.0);
+        private void streamFilteredDailyRaw(JsonReader reader, JsonWriter writer, Set<String> ignored, Map<String, Double> newDaily) throws IOException {
+            reader.beginObject();
+            writer.beginObject();
+            while (reader.hasNext()) {
+                String date = reader.nextName();
+                writer.name(date);
+                reader.beginObject();
+                writer.beginObject();
+                double sumMinutes = 0;
+                while (reader.hasNext()) {
+                    String player = reader.nextName();
+                    double val = reader.nextDouble();
+                    if (!ignored.contains(player.toLowerCase())) {
+                        writer.name(player);
+                        writer.value(val);
+                        sumMinutes += val;
                     }
                 }
+                reader.endObject();
+                writer.endObject();
+                newDaily.put(date, Math.round((sumMinutes / 60.0) * 100.0) / 100.0);
+            }
+            reader.endObject();
+            writer.endObject();
+        }
 
-                if (data.has("hourly")) {
-                    JsonObject hly = data.getAsJsonObject("hourly");
-                    for (String date : hly.keySet()) {
-                        JsonObject dayMap = hly.getAsJsonObject(date);
-                        List<String> toRemove = new ArrayList<>();
-                        for (String p : dayMap.keySet()) {
-                            if (cfg.isPlayerIgnored(p)) toRemove.add(p);
-                        }
-                        for (String p : toRemove) dayMap.remove(p);
+        private void streamFilteredHourly(JsonReader reader, JsonWriter writer, Set<String> ignored) throws IOException {
+            reader.beginObject();
+            writer.beginObject();
+            while (reader.hasNext()) {
+                String date = reader.nextName();
+                writer.name(date);
+                reader.beginObject();
+                writer.beginObject();
+                while (reader.hasNext()) {
+                    String player = reader.nextName();
+                    if (ignored.contains(player.toLowerCase())) {
+                        reader.skipValue();
+                    } else {
+                        writer.name(player);
+                        JsonElement val = GSON.fromJson(reader, JsonElement.class);
+                        GSON.toJson(val, writer);
                     }
                 }
+                reader.endObject();
+                writer.endObject();
+            }
+            reader.endObject();
+            writer.endObject();
+        }
 
-                data.add("daily", GSON.toJsonTree(newDaily));
-                data.add("ignored_players", GSON.toJsonTree(cfg.ignored_players));
+        private void serveCached(HttpExchange exchange, byte[] data, String etag) throws IOException {
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+            exchange.getResponseHeaders().set("ETag", etag);
 
+            boolean useGzip = clientAcceptsGzip(exchange);
+            if (useGzip) {
+                exchange.getResponseHeaders().set("Content-Encoding", "gzip");
                 exchange.sendResponseHeaders(200, 0);
                 try (OutputStream raw = exchange.getResponseBody();
-                     OutputStream out = useGzip ? new GZIPOutputStream(raw) : raw;
-                     Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-                     JsonWriter jw = new JsonWriter(w)) {
-                    GSON.toJson(data, jw);
+                     GZIPOutputStream gzos = new GZIPOutputStream(raw)) {
+                    gzos.write(data);
                 }
-            } catch (Exception e) {
-                FabricDashboardMod.LOGGER.error("Failed to serve filtered API activity", e);
-                try { exchange.sendResponseHeaders(500, -1); } catch (IOException ignored) {}
+            } else {
+                exchange.sendResponseHeaders(200, data.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(data);
+                }
             }
         }
 
@@ -822,6 +929,7 @@ public class DashboardWebServer {
             return false;
         }
     }
+
 
     private static class LiveMetricsHandler implements HttpHandler {
         private final DashboardWebServer server;

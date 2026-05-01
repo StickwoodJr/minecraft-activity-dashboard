@@ -365,10 +365,18 @@ public class LogParser {
             }
         }
         
-        try (Writer writer = new FileWriter(cacheFile)) {
-            GSON.toJson(data, writer);
+        File tempFile = new File(cacheFile.getAbsolutePath() + ".tmp");
+        try {
+            try (Writer writer = new FileWriter(tempFile)) {
+                GSON.toJson(data, writer);
+            }
+            java.nio.file.Files.move(tempFile.toPath(), cacheFile.toPath(), 
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING, 
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
         } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed to save cache", e);
+            FabricDashboardMod.LOGGER.error("Failed to save cache atomically", e);
+            if (tempFile.exists()) tempFile.delete();
         }
     }
+
 }
