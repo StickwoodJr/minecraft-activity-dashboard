@@ -180,13 +180,31 @@ public class DashboardConfig {
     }
 
     /**
-     * Normalizes a player name to its canonical display name if an alias exists.
+     * Normalizes a player to its canonical display name if an alias exists for either the name or UUID.
      */
-    public String getNormalizedName(String playerName) {
-        if (playerName == null) return null;
-        if (aliasesLower == null || aliasesLower.isEmpty()) return playerName;
-        String aliased = aliasesLower.get(playerName.toLowerCase());
-        return (aliased != null) ? aliased : playerName;
+    public String getNormalizedName(String playerName, String uuidStr) {
+        if (aliasesLower == null || aliasesLower.isEmpty()) return (playerName != null) ? playerName : uuidStr;
+        
+        // 1. Try UUID match first (it's more stable)
+        if (uuidStr != null) {
+            String aliased = aliasesLower.get(uuidStr.toLowerCase());
+            if (aliased != null) return aliased;
+        }
+
+        // 2. Try Name match
+        if (playerName != null) {
+            String aliased = aliasesLower.get(playerName.toLowerCase());
+            if (aliased != null) return aliased;
+        }
+
+        return (playerName != null) ? playerName : uuidStr;
+    }
+
+    /**
+     * Normalizes a single identifier (name or UUID) to its canonical display name.
+     */
+    public String getNormalizedName(String identifier) {
+        return getNormalizedName(identifier, identifier);
     }
 
     private void recomputeDerived() {

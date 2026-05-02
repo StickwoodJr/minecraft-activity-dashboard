@@ -79,16 +79,7 @@ public class StatsAggregator {
     }
 
     private String normalizePlayer(String name, String uuidStr) {
-        if (name == null) name = uuidStr;
-        String n = name.trim();
-        Map<String, String> aliases = com.playtime.dashboard.config.DashboardConfig.get().getAliasesLower();
-        if (!aliases.isEmpty()) {
-            String byUuid = aliases.get(uuidStr.toLowerCase());
-            if (byUuid != null) return byUuid;
-            String byName = aliases.get(n.toLowerCase());
-            if (byName != null) return byName;
-        }
-        return n;
+        return DashboardConfig.get().getNormalizedName(name, uuidStr);
     }
 
     private void parseStatsIntoMap(JsonReader reader, String playerName, Map<String, Map<String, Map<String, Integer>>> result) throws IOException {

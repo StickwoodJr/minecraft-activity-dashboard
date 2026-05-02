@@ -750,15 +750,7 @@ public class EventManager {
             } catch (Exception e) { /* ignored */ }
         }
 
-        Map<String, String> aliases = DashboardConfig.get().getAliasesLower();
-        if (!aliases.isEmpty()) {
-            String byUuid = aliases.get(uuidStr.toLowerCase());
-            if (byUuid != null) return byUuid;
-            String byName = aliases.get(name.toLowerCase());
-            if (byName != null) return byName;
-        }
-
-        return name;
+        return DashboardConfig.get().getNormalizedName(name, uuidStr);
     }
 
     private void load() {
