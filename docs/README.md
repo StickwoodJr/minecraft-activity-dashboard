@@ -30,6 +30,7 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 ### 👤 Intelligent Player Profiles
 *   **3D Skin Viewer**: Real-time 3D player model rendering with walking animations.
 *   **Session Analytics**: View total playtime, session counts, average session length, and the elusive "Longest Session."
+*   **Status Indicators**: Visual indicators representing online/offline status natively integrated throughout the dashboard profiles.
 
 ### 🗺️ Live Dynmap Integration
 *   **Embedded World Map**: View your live [Dynmap](https://www.curseforge.com/minecraft/mc-mods/dynmap) directly inside the dashboard.
@@ -39,7 +40,7 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 ### ⚡ Live Server Performance
 *   **Real-Time Metrics**: Monitor Server TPS, MSPT (Tick Times), CPU usage, and JVM Memory directly from the dashboard.
 *   **Container Optimized**: Specialized support for Pterodactyl/Docker environments, reporting actual folder size (`/home/container`) rather than misleading host partition data.
-*   **Live Player List**: See who is online right now. Click any online player to jump straight to their full activity history.
+*   **Live Player List**: See who is online right now. View live player coordinates, and click any online player to jump straight to their full activity history.
 *   **Header KPI Widget**: Monitor players, TPS, and MSPT instantly from the main header, regardless of which tab you are currently viewing.
 *   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
 
@@ -115,6 +116,8 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `ignored_players` | `[]` | List of player names to exclude from all stats. | Yes |
 | `max_concurrent_events` | `3` | Maximum number of events that can run at once. | Yes |
 | `streak_timezone` | `"America/Toronto"` | Timezone used for daily streak calculation. | Yes |
+| `streak_minimum_minutes_per_day` | `60` | Minutes required in a day to maintain a streak. | Yes |
+| `streak_cache_ttl_minutes` | `-1` | Cache TTL for streak data (-1 to inherit from incremental update). | Yes |
 | `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. | Yes |
 | `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. | Yes |
 | `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. | Yes |
@@ -124,5 +127,7 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 
 ## Performance & Privacy
 - **Zero Database**: No SQL setup required; uses an optimized JSON flat-file cache.
-- **Background Processing**: All log parsing and stats aggregation happens on a low-priority background thread to prevent server lag or TPS drops.
-- **Case-Insensitive Filters**: Robust privacy controls to hide bots, admins, or specific players from public view.
+- **Background Processing**: All log parsing, stats aggregation, and event persistence happen asynchronously on low-priority background threads to prevent server lag or TPS drops.
+- **Efficient API Delivery**: Utilizes ETag/304 conditional caching and memory-efficient streaming for optimal performance under heavy load.
+- **Crash Resilience**: Precise log parsing capable of intelligently tracking ghost sessions and reconstructing clean timestamps even during unexpected server crashes.
+- **Case-Insensitive Filters**: Robust, unified privacy controls to consistently hide bots, admins, or specific players from public view across all metrics.
