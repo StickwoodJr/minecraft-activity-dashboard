@@ -63,6 +63,23 @@ public class DashboardConfig {
     public int world_size_refresh_minutes = DEFAULT_WORLD_SIZE_REFRESH_MINUTES;
     public int world_size_max_depth = DEFAULT_WORLD_SIZE_MAX_DEPTH;
     public int uuid_refresh_cooldown_seconds = DEFAULT_UUID_REFRESH_COOLDOWN;
+    public List<String> item_suffixes = Arrays.asList(
+        "_sword", "_pickaxe", "_axe", "_shovel", "_hoe", "_helmet", "_chestplate", "_leggings", "_boots",
+        "_bucket", "_potion", "_stew", "_soup", "_bottle", "_pearl", "_egg", "_rod", "_shears", "_bow",
+        "_crossbow", "_trident", "_shield", "_flint_and_steel", "_spyglass", "_compass", "_clock"
+    );
+    public List<String> item_names = Arrays.asList(
+        "minecraft:apple", "minecraft:bread", "minecraft:steak", "minecraft:cooked_porkchop", "minecraft:cooked_mutton",
+        "minecraft:cooked_chicken", "minecraft:cooked_rabbit", "minecraft:cooked_cod", "minecraft:cooked_salmon",
+        "minecraft:cookie", "minecraft:pumpkin_pie", "minecraft:sweet_berries", "minecraft:glow_berries",
+        "minecraft:melon_slice", "minecraft:carrot", "minecraft:potato", "minecraft:baked_potato", "minecraft:poisonous_potato",
+        "minecraft:dried_kelp", "minecraft:honey_bottle", "minecraft:totem_of_undying", "minecraft:experience_bottle",
+        "minecraft:ender_pearl", "minecraft:snowball", "minecraft:egg", "minecraft:firework_rocket", "minecraft:firework_star",
+        "minecraft:lead", "minecraft:name_tag", "minecraft:bone_meal", "minecraft:ender_eye", "minecraft:ghast_tear"
+    );
+    public List<String> redstone_items = Arrays.asList(
+        "redstone", "repeater", "comparator", "observer", "piston", "sticky_piston", "redstone_torch", "lever", "daylight_detector", "target", "sculk_sensor", "dropper", "dispenser", "hopper", "trapped_chest", "tnt", "tnt_minecart", "redstone_lamp", "redstone_block", "tripwire_hook", "sculk_shrieker", "sculk_catalyst"
+    );
 
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static DashboardConfig instance;
@@ -228,6 +245,10 @@ public class DashboardConfig {
         world_size_refresh_minutes = checkRange("world_size_refresh_minutes", world_size_refresh_minutes, 1, 1440, DEFAULT_WORLD_SIZE_REFRESH_MINUTES);
         world_size_max_depth = checkRange("world_size_max_depth", world_size_max_depth, 1, 32, DEFAULT_WORLD_SIZE_MAX_DEPTH);
         uuid_refresh_cooldown_seconds = checkRange("uuid_refresh_cooldown_seconds", uuid_refresh_cooldown_seconds, 0, 86400, DEFAULT_UUID_REFRESH_COOLDOWN);
+
+        if (item_suffixes == null) item_suffixes = Collections.emptyList();
+        if (item_names == null) item_names = Collections.emptyList();
+        if (redstone_items == null) redstone_items = Collections.emptyList();
     }
 
     private int checkRange(String key, int value, int min, int max, int defaultValue) {
