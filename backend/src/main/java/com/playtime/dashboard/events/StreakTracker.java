@@ -87,7 +87,8 @@ public class StreakTracker {
                 }
                 if (dayEntry.getValue() == null) continue;
                 for (Map.Entry<String, Double> playerEntry : dayEntry.getValue().entrySet()) {
-                    String player = playerEntry.getKey();
+                    String rawPlayer = playerEntry.getKey();
+                    String player = DashboardConfig.get().getNormalizedName(rawPlayer);
                     double mins = playerEntry.getValue() == null ? 0.0 : playerEntry.getValue();
                     playerDailyMinutes.computeIfAbsent(player, k -> new HashMap<>()).merge(day, mins, Double::sum);
                 }
@@ -122,8 +123,10 @@ public class StreakTracker {
             streakData.lastUpdateDay = lastUpdateDay;
 
             streaks.put(player, streakData);
-            Optional<java.util.UUID> maybeUuid = UuidCache.getInstance().getUuid(player);
-            maybeUuid.ifPresent(uuid -> streaks.put(uuid.toString(), streakData));
+            
+            // Map the streak to the primary UUID if possible (centralized resolution)
+            DashboardConfig.get().resolvePrimaryUuid(player)
+                .ifPresent(uuid -> streaks.put(uuid.toString(), streakData));
         }
         return streaks;
     }
