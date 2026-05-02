@@ -208,27 +208,12 @@ public class PlayerHeadService {
         if ("Advent/Hanger".equals(playerName)) {
             lookupName = "Advent";
         }
-        String url = "https://api.mojang.com/users/profiles/minecraft/" + lookupName;
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET()
-                .timeout(Duration.ofSeconds(10))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        // 429 = rate limited — throw so the caller marks it as failed (short TTL retry)
-        if (response.statusCode() == 429) {
-            throw new IOException("Mojang rate limit hit for " + playerName);
-        }
-        if (response.statusCode() != 200) return null;
-
-        // Minimal JSON parsing with Gson
-        com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject();
-        if (json.has("id")) {
-            return json.get("id").getAsString();
-        }
-        return null;
+        
+        return com.playtime.dashboard.util.UuidCache.getInstance()
+                .getUuid(lookupName)
+                .map(UUID::toString)
+                .map(s -> s.replace("-", ""))
+                .orElse(null);
     }
 
     private String fetchSkinUrl(String uuid) throws Exception {

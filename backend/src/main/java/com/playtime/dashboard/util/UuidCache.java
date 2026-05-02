@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.playtime.dashboard.FabricDashboardMod;
+import com.playtime.dashboard.config.DashboardConfig;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.File;
@@ -56,13 +57,22 @@ public class UuidCache {
                     return size() > NETWORK_LRU_CAPACITY;
                 }
             });
-    private final Set<UUID> networkFailed = Collections.synchronizedSet(
-            Collections.newSetFromMap(new LinkedHashMap<UUID, Boolean>(NETWORK_LRU_CAPACITY, 0.75f, true) {
+    /** Map of UUIDs that failed resolution to the epoch timestamp of the last attempt. */
+    private final Map<UUID, Long> networkFailed = Collections.synchronizedMap(
+            new LinkedHashMap<UUID, Long>(NETWORK_LRU_CAPACITY, 0.75f, true) {
                 @Override
-                protected boolean removeEldestEntry(Map.Entry<UUID, Boolean> eldest) {
+                protected boolean removeEldestEntry(Map.Entry<UUID, Long> eldest) {
                     return size() > NETWORK_LRU_CAPACITY;
                 }
-            }));
+            });
+    /** Map of usernames that failed resolution to the epoch timestamp of the last attempt. */
+    private final Map<String, Long> networkFailedNames = Collections.synchronizedMap(
+            new LinkedHashMap<String, Long>(NETWORK_LRU_CAPACITY, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+                    return size() > NETWORK_LRU_CAPACITY;
+                }
+            });
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private static final Gson GSON = new Gson();
@@ -162,6 +172,15 @@ public class UuidCache {
         if (uuid != null) return Optional.of(uuid);
 
         FabricDashboardMod.LOGGER.info("UUID for '" + username + "' not found locally, trying Mojang API...");
+        
+        long now = System.currentTimeMillis();
+        Long lastAttempt = networkFailedNames.get(key);
+        int cooldownSec = DashboardConfig.get().uuid_refresh_cooldown_seconds;
+        if (lastAttempt != null && (now - lastAttempt) < cooldownSec * 1000L) {
+            FabricDashboardMod.LOGGER.info("Skipping Mojang lookup for '{}' (throttled). Last attempt: {}s ago", username, (now - lastAttempt) / 1000);
+            return Optional.empty();
+        }
+
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.mojang.com/users/profiles/minecraft/" + username))
@@ -188,7 +207,8 @@ public class UuidCache {
         } catch (Exception e) {
             FabricDashboardMod.LOGGER.error("Mojang API lookup failed for '" + username + "': " + e.getMessage());
         }
-
+        
+        networkFailedNames.put(key, System.currentTimeMillis());
         return Optional.empty();
     }
 
@@ -204,7 +224,12 @@ public class UuidCache {
         name = networkResolved.get(uuid);
         if (name != null) return Optional.of(name);
 
-        if (networkFailed.contains(uuid)) return Optional.empty();
+        long now = System.currentTimeMillis();
+        Long lastAttempt = networkFailed.get(uuid);
+        int cooldownSec = DashboardConfig.get().uuid_refresh_cooldown_seconds;
+        if (lastAttempt != null && (now - lastAttempt) < cooldownSec * 1000L) {
+            return Optional.empty();
+        }
 
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -227,7 +252,7 @@ public class UuidCache {
             // Network failure or rate limit, fall through.
         }
 
-        networkFailed.add(uuid);
+        networkFailed.put(uuid, System.currentTimeMillis());
         return Optional.empty();
     }
 
@@ -239,5 +264,45 @@ public class UuidCache {
         for (UUID u : nameToUuid.values()) uuids.add(u.toString());
         for (UUID u : runtimeNameToUuid.values()) uuids.add(u.toString());
         return uuids;
+    }
+
+    public boolean isLocal(String nameOrUuid) {
+        if (nameOrUuid == null) return false;
+        String key = nameOrUuid.toLowerCase();
+        if (runtimeNameToUuid.containsKey(key) || nameToUuid.containsKey(key)) return true;
+        try {
+            UUID uuid = UUID.fromString(nameOrUuid);
+            return runtimeUuidToName.containsKey(uuid) || uuidToName.containsKey(uuid);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    public boolean isNetworkResolved(UUID uuid) {
+        return networkResolved.containsKey(uuid);
+    }
+
+    public Long getNetworkLastAttempt(String name) {
+        return networkFailedNames.get(name.toLowerCase());
+    }
+
+    public Long getNetworkLastAttempt(UUID uuid) {
+        return networkFailed.get(uuid);
+    }
+
+    public boolean isRuntime(String name) {
+        return runtimeNameToUuid.containsKey(name.toLowerCase());
+    }
+
+    public boolean isDisk(String name) {
+        return nameToUuid.containsKey(name.toLowerCase());
+    }
+
+    public boolean isRuntime(UUID uuid) {
+        return runtimeUuidToName.containsKey(uuid);
+    }
+
+    public boolean isDisk(UUID uuid) {
+        return uuidToName.containsKey(uuid);
     }
 }
