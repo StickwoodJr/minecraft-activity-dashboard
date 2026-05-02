@@ -29,6 +29,8 @@ public class DashboardConfig {
     public static final int DEFAULT_LIVE_UPDATE_INTERVAL = 3;
     public static final int DEFAULT_MAX_CONCURRENT_EVENTS = 3;
     public static final int DEFAULT_STREAK_MINIMUM_MINUTES = 60;
+    public static final int DEFAULT_WORLD_SIZE_REFRESH_MINUTES = 30;
+    public static final int DEFAULT_WORLD_SIZE_MAX_DEPTH = 8;
 
     public int config_version = CURRENT_CONFIG_VERSION;
     public int web_port = DEFAULT_WEB_PORT;
@@ -56,6 +58,8 @@ public class DashboardConfig {
     public int streak_minimum_minutes_per_day = DEFAULT_STREAK_MINIMUM_MINUTES;
     public int streak_cache_ttl_minutes = -1; // -1 means inherit incremental_update_interval_minutes
     public boolean allow_pvp_events = true;
+    public int world_size_refresh_minutes = DEFAULT_WORLD_SIZE_REFRESH_MINUTES;
+    public int world_size_max_depth = DEFAULT_WORLD_SIZE_MAX_DEPTH;
 
     private static final transient Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static DashboardConfig instance;
@@ -165,6 +169,9 @@ public class DashboardConfig {
         if (streak_cache_ttl_minutes != -1) {
             streak_cache_ttl_minutes = checkRange("streak_cache_ttl_minutes", streak_cache_ttl_minutes, 1, 1440, -1);
         }
+
+        world_size_refresh_minutes = checkRange("world_size_refresh_minutes", world_size_refresh_minutes, 1, 1440, DEFAULT_WORLD_SIZE_REFRESH_MINUTES);
+        world_size_max_depth = checkRange("world_size_max_depth", world_size_max_depth, 1, 32, DEFAULT_WORLD_SIZE_MAX_DEPTH);
     }
 
     private int checkRange(String key, int value, int min, int max, int defaultValue) {

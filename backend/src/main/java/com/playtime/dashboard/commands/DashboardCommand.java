@@ -3,6 +3,8 @@ package com.playtime.dashboard.commands;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.playtime.dashboard.FabricDashboardMod;
+import com.playtime.dashboard.config.DashboardConfig;
 import com.playtime.dashboard.events.EventManager;
 import com.playtime.dashboard.events.ServerEvent;
 import com.playtime.dashboard.web.DashboardWebServer;
@@ -264,6 +266,92 @@ public class DashboardCommand {
                     context.getSource().sendMessage(Text.literal("§eExecutor alive: §f" + execAlive));
                     return 1;
                 })
+                .then(CommandManager.literal("worldsize")
+                    .requires(source -> source.hasPermissionLevel(2))
+                    .executes(context -> {
+                        DashboardWebServer ws = DashboardWebServer.getInstance();
+                        if (ws == null) {
+                            context.getSource().sendError(Text.literal("[Dashboard] Web server is not running."));
+                            return 0;
+                        }
+
+                        long now        = System.currentTimeMillis();
+                        long sizeMb     = ws.getCachedWorldSizeMb();
+                        long lastCheck  = ws.getLastWorldSizeCheck();
+                        boolean isDown  = ws.isWorldSizeExecutorShutdown();
+                        boolean isTerm  = ws.isWorldSizeExecutorTerminated();
+                        int refreshMin  = DashboardConfig.get().world_size_refresh_minutes;
+                        int maxDepth    = DashboardConfig.get().world_size_max_depth;
+                        long refreshMs  = refreshMin * 60_000L;
+
+                        // Elapsed since last submission — compact "Xm Xs" format intentional
+                        // (distinct from formatDuration which targets event durations with days/hours)
+                        String lastStr;
+                        if (lastCheck == 0) {
+                            lastStr = "never";
+                        } else {
+                            long elapsedSec = (now - lastCheck) / 1000;
+                            lastStr = formatElapsed(elapsedSec) + " ago";
+                        }
+
+                        // Time until next submission
+                        String nextStr;
+                        if (lastCheck == 0) {
+                            nextStr = "pending first run";
+                        } else {
+                            long remainMs = (lastCheck + refreshMs) - now;
+                            nextStr = remainMs <= 0 ? "overdue" : "in " + (remainMs / 1000) + "s";
+                        }
+
+                        // Executor status derived from focused boolean accessors only
+                        String execStatus;
+                        if (isTerm)       execStatus = "terminated";
+                        else if (isDown)  execStatus = "shutdown";
+                        else              execStatus = "running";
+
+                        String copyPayload =
+                            "Dashboard Debug: World Size\n" +
+                            "Cached world size: " + sizeMb + " MB\n" +
+                            "Last walk submitted: " + lastStr + "\n" +
+                            "Next walk due: " + nextStr + "\n" +
+                            "Refresh interval: " + refreshMin + " min\n" +
+                            "Max walk depth: " + maxDepth + "\n" +
+                            "Executor status: " + execStatus;
+
+                        Text copyButton = Text.literal(" §7[§bCopy§7]")
+                            .styled(s -> s
+                                .withClickEvent(new ClickEvent(
+                                    ClickEvent.Action.COPY_TO_CLIPBOARD, copyPayload))
+                                .withHoverEvent(new net.minecraft.text.HoverEvent(
+                                    net.minecraft.text.HoverEvent.Action.SHOW_TEXT,
+                                    Text.literal("§7Click to copy debug info"))));
+
+                        ServerCommandSource src = context.getSource();
+                        src.sendMessage(Text.literal("§6--- Dashboard Debug: World Size ---").append(copyButton));
+                        src.sendMessage(Text.literal("§eCached world size: §f" + sizeMb + " MB"));
+                        src.sendMessage(Text.literal("§eLast walk submitted: §f" + lastStr));
+                        src.sendMessage(Text.literal("§eNext walk due: §f" + nextStr));
+                        src.sendMessage(Text.literal("§eRefresh interval: §f" + refreshMin + " min"));
+                        src.sendMessage(Text.literal("§eMax walk depth: §f" + maxDepth));
+                        src.sendMessage(Text.literal("§eExecutor status: §f" + execStatus));
+
+                        // Thread-identity no-op: output goes to server log only, not chat.
+                        // Guarded by shutdown check, with race-condition catch for the narrow
+                        // window between the check and the actual submission.
+                        if (!isDown) {
+                            try {
+                                ws.submitWorldSizeThreadIdentityCheck();
+                                src.sendMessage(Text.literal("§7Thread identity check submitted — see server log."));
+                            } catch (java.util.concurrent.RejectedExecutionException e) {
+                                src.sendMessage(Text.literal("§cThread check skipped — executor rejected task (shutting down)."));
+                            }
+                        } else {
+                            src.sendMessage(Text.literal("§cExecutor is shut down — thread identity check skipped."));
+                        }
+
+                        return 1;
+                    })
+                )
             )
             .then(CommandManager.literal("reload")
                 .requires(source -> source.hasPermissionLevel(2))
@@ -394,5 +482,16 @@ public class DashboardCommand {
         if (m > 0 || h > 0 || d > 0) sb.append(m).append("m ");
         sb.append(s).append("s");
         return sb.toString();
+    }
+
+    /**
+     * Formats an elapsed number of seconds as a compact human-readable string,
+     * e.g. "2m 14s" or "45s". Used by the worldsize debug subcommand.
+     */
+    private static String formatElapsed(long seconds) {
+        long m = seconds / 60;
+        long s = seconds % 60;
+        if (m > 0) return m + "m " + s + "s";
+        return s + "s";
     }
 }
