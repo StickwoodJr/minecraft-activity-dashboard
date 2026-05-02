@@ -215,6 +215,28 @@ public class DashboardWebServer {
                         java.nio.file.Path statsDir = FabricLoader.getInstance().getGameDir()
                             .resolve(DashboardConfig.get().stats_world_name)
                             .resolve("stats");
+
+                        // Optimization: Skip rebuild if no stats files have changed
+                        long lastRebuild = leaderboardCacheFile.exists() ? leaderboardCacheFile.lastModified() : 0;
+                        File[] statsFiles = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
+                        // If no cache exists, or stats directory is missing/unreadable, trigger a build attempt.
+                        boolean needsRebuild = (lastRebuild == 0 || statsFiles == null);
+                        
+                        if (!needsRebuild) {
+                            for (File f : statsFiles) {
+                                // Use >= to account for filesystem timestamp resolution (often 1s on ext4).
+                                // This may cause occasional redundant rebuilds but prevents missed updates.
+                                if (f.lastModified() >= lastRebuild) {
+                                    needsRebuild = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!needsRebuild) {
+                            return;
+                        }
+
                         uuidCache.refresh(); // Re-read usercache.json
                         Map<String, Map<String, Map<String, Integer>>> leaderboards = statsAggregator.buildLeaderboards(statsDir, uuidCache);
                         
