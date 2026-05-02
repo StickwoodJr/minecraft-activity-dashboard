@@ -1,63 +1,195 @@
 # Minecraft Activity Dashboard
 
-A high-performance Fabric mod that tracks player activity and provides a beautiful, interactive web dashboard.
+## Overview
+This project provides a comprehensive activity dashboard for Minecraft servers. Built as a Java Fabric mod, it tracks player join and leave events, aggregates in-game statistics, and provides real-time performance monitoring via an interactive dashboard served directly from the server—no external web servers or databases required.
 
-## Features
+## How It Works
+The mod features an embedded lightweight HTTP server that runs quietly in the background of your Minecraft server. It automatically parses your server's log files (including compressed `.log.gz` archives) to calculate player session times and caches this data in a JSON file. When you visit the dashboard, the embedded server delivers a modern HTML/JS interface alongside the cached data, ensuring virtually zero impact on server performance.
 
--   🔥 **Interactive Heatmap**: Visualize server activity over months and years.
--   📊 **Player Statistics**: Detailed breakdowns of playtime, sessions, and averages.
--   🏆 **Leaderboards**: Competitive tracking for kills, deaths, blocks, and more.
--   📅 **Event System**: Automated and manual server-wide competitions.
--   ⚡ **Live Metrics**: Real-time TPS, MSPT, and CPU monitoring.
--   🔄 **Identity Normalization**: Merge multiple accounts/aliases into a single display identity.
--   🛡️ **Privacy Controls**: Easily ignore staff or bot accounts from all tracking.
+## Dashboard Features
+
+### \ud83d\udcc5 Activity Heatmap
+*   **GitHub-Style Calendar**: Visualize server activity over months with intensity-coded tiles.
+*   **Player Filtering**: Search and filter the heatmap by player to see their specific activity patterns and busiest days.
+*   **Interactive Day Details**: Click any day to see a detailed player breakdown, including a pie chart of playtime distribution and an hourly activity graph.
+*   **Deep Linking**: Navigate directly from a player's profile to their busiest day in history.
+
+### \ud83d\udd0d Global Player Search
+*   **Omni-Search**: Quickly find any player across the entire server history from the main header.
+*   **Shortcut Support**: Access the search bar instantly using `Ctrl+K` (or `Cmd+K` on Mac).
+*   **Instant Drill-Down**: Selecting a player from the search results opens their full profile modal with 3D skin and session analytics.
+
+### \ud83c\udfc6 Global Leaderboards
+*   **Automatic Aggregation**: The mod scans Minecraft world stats to build leaderboards for:
+    *   Total Distance Traveled (converted to km)
+    *   Player Kills & Mob Kills
+    *   Deaths & Damage Taken/Dealt
+    *   Special stats like Totems Used, Event Points, and more.
+*   **Interactive Sorting**: Search and sort leaderboards by any metric and click players to view their full activity profile.
+
+### \ud83d\udc64 Intelligent Player Profiles
+*   **3D Skin Viewer**: Real-time 3D player model rendering with walking animations.
+*   **Session Analytics**: View total playtime, session counts, average session length, and the elusive "Longest Session."
+*   **Status Indicators**: Visual indicators representing online/offline status natively integrated throughout the dashboard profiles.
+
+### \ud83d\uddfa\ufe0f Live Dynmap Integration
+*   **Embedded World Map**: View your live [Dynmap](https://www.curseforge.com/minecraft/mc-mods/dynmap) directly inside the dashboard.
+*   **State-Preserving Tabs**: Switch between playtime stats and the live map without losing your zoom level or position.
+*   **Togglable**: Easily enable or disable the map tab via configuration.
+
+### \u26a1 Live Server Performance
+*   **Real-Time Metrics**: Monitor Server TPS, MSPT (Tick Times), CPU usage, and JVM Memory directly from the dashboard.
+*   **Container Optimized**: Specialized support for Pterodactyl/Docker environments, reporting actual folder size (`/home/container`) rather than misleading host partition data.
+*   **Live Player List**: See who is online right now. View live player coordinates, and click any online player to jump straight to their full activity history.
+*   **Header KPI Widget**: Monitor players, TPS, and MSPT instantly from the main header, regardless of which tab you are currently viewing.
+*   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
+
+### \ud83c\udf96\ufe0f Server Events & Competitions
+*   **Multiple Concurrent Events**: Run multiple competitions simultaneously (e.g., "Mega Mining Mayhem" and "Playtime Challenge").
+*   **Admin-Driven Events**: Create timed competitions using `/dashboard event create`. Supported types: `playtime`, `mob_kills`, `blocks_placed`, `blocks_mined`, `fewest_deaths`, `damage_dealt`, `player_kills`, `fish_caught`, `daily_streak`, `obsidian_placed`, and `obsidian_mined`.
+*   **Live Scoreboards**: Progress is tracked in real-time on a premium in-game sidebar. Each player can choose which event to track via `/dashboard event scoreboard`.
+    *   **Real-time Timer**: Displays time remaining directly on the sidebar.
+    *   **Sleek Layout**: Scores are right-aligned for better readability.
+    *   **Privacy Controls**: Players can hide/show their personal scoreboard.
+*   **Inverted Leaderboards**: Support for `fewest_deaths` where the lowest score wins, correctly sorted on the Minecraft sidebar.
+*   **Player Head Rendering**: Native rendering of player heads on the sidebar using a dynamic resource pack.
+*   **Web Leaderboard**: A dedicated "Events" tab on the dashboard with individual cards for each active event, live timers, and interactive leaderboards.
+*   **Automatic Rewards**: Earn "All-Time Points" for top placements, tracked on a permanent server-wide leaderboard.
+
+### \ud83d\udd25 Daily Playtime Streaks
+*   **Activity Milestones**: Automatically tracks players who reach 60 minutes of playtime in a calendar day.
+*   **Log-Derived Persistence**: Streaks are calculated from historical activity logs, ensuring consistency even after server restarts.
+*   **Visual Recognition**: Current streaks are displayed in player profiles and have their own dedicated "Daily Playtime Streak" leaderboard.
+
+## Getting Started
+
+### Prerequisites
+- Fabric-compatible Minecraft Server
+- Java Development Kit (JDK) 21
+
+### Building Locally
+The project is built using Gradle. To compile the mod and synchronize the web assets:
+
+```bash
+cd backend/
+./gradlew build
+```
+
+The `syncWebAssets` task automatically copies the frontend files from `frontend/` into the mod's resources before compilation, ensuring a single source of truth for UI changes.
+
+### Installation
+Once built, drop the resulting `.jar` file from `backend/build/libs/` into your server's `mods` folder and start the server.
+
+By default, the dashboard is accessible at `http://<your-server-ip>:8105`.
+
+## Server Commands
+
+| Command | Description | Permission |
+| :--- | :--- | :--- |
+| `/dashboard event create <type> <hours> <title>` | Start a new timed event. | OP (2) |
+| `/dashboard event stop [id]` | Stop a specific event (or the latest if no ID provided). | OP (2) |
+| `/dashboard event list` | List all active events and their IDs. | All |
+| `/dashboard event status [id]` | View details and remaining time for an event (optional ID for detailed top-10). | All |
+| `/dashboard event setlength <id> <hours>` | Update the duration of an active event. | OP (2) |
+| `/dashboard event scoreboard <id>` | Switch your personal sidebar to track a specific event (unhides if hidden). | All |
+| `/dashboard event scoreboard hide` | Hide your personal event sidebar. | All |
+| `/dashboard event scoreboard show` | Show your personal event sidebar. | All |
+| `/dashboard event clearpoints all [amount]` | Clear or reduce all-time points for all players. | OP (2) |
+| `/dashboard event clearpoints user <name> [amount]` | Clear or reduce all-time points for a specific player. | OP (2) |
+| `/dashboard reparse` | Force a full re-parse of all server logs to refresh activity data. | OP (2) |
+| `/dashboard reload` | Reload the mod configuration. | OP (2) |
+| `/dashboard debug` | Print EventManager persistence health (dirty flag, save counters, executor status). | OP (2) |
+| `/dashboard debug worldsize` | Print world-size executor state: cached size, last/next walk timing, config, and executor status. Submits a thread-identity check to the server log. | OP (2) |
+| `/dashboard debug uuid <identifier>` | Inspect UUID/Name cache state (Runtime/Disk/Network), last network attempt timing, and cooldown status. | OP (2) |
+| `/dashboard debug rebuild-meta` | Clear the player head metadata cache and force a fresh rebuild of `meta.json`. | OP (2) |
 
 ## Configuration
+Settings are managed via `config/dashboard-config.json`. The file is automatically generated on first run.
 
-The mod generates a `dashboard-config.json` in your server's `config/` directory.
+| Setting | Default | Description | Hot-Reloadable |
+| :--- | :--- | :--- | :--- |
+| `config_version` | `1` | Configuration schema version. | Yes |
+| `web_port` | `8105` | The port the dashboard web server listens on. | **No (Restart Required)** |
+| `logs_directory` | `""` | Custom path to server logs (defaults to `./logs`). | **No (Restart Required)** |
+| `stats_world_name` | `"world"` | The name of your world folder to read stats from. | **No (Restart Required)** |
+| `tab_title` | `"Playtime Dashboard"` | The browser tab title. | Yes |
+| `dashboard_title` | `"Activity Dashboard"` | The main heading on the dashboard. | Yes |
+| `custom_logo_path` | `""` | Path to a local `.jpg` or `.png` for the dashboard logo. | Yes |
+| `enable_dynmap` | `true` | Toggle the Dynmap tab on/off. | Yes |
+| `dynmap_url` | `""` | The URL of your Dynmap instance. | Yes |
+| `ignored_players` | `["ironfarmbot", "mobfarmbot"]` | List of player names to exclude from all stats and leaderboards (case-insensitive). | Yes |
+| `player_aliases` | `{}` | Map raw player names or UUIDs to a single canonical display name. See [Player Aliases](#player-aliases) below. | Yes |
+| `max_concurrent_events` | `3` | Maximum number of events that can run at once. | Yes |
+| `streak_timezone` | `"America/Toronto"` | Timezone used for daily streak calculation. | Yes |
+| `streak_minimum_minutes_per_day` | `60` | Minutes required in a day to maintain a streak. | Yes |
+| `streak_cache_ttl_minutes` | `-1` | Cache TTL for streak data (-1 to inherit from incremental update). | Yes |
+| `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. | Yes |
+| `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. | Yes |
+| `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. | Yes |
+| `resource_pack_url` | `""` | The URL where clients download the custom font resource pack. | **No (Restart Required)** |
+| `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. | Yes |
+| `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. | Yes |
+| `world_size_refresh_minutes` | `30` | How often (in minutes) to recompute the world directory size in the background. | Yes |
+| `world_size_max_depth` | `8` | Maximum directory recursion depth for the world size walk. | Yes |
+| `uuid_refresh_cooldown_seconds` | `3600` | Seconds to wait before re-resolving unknown or failed player names/UUIDs via Mojang. | Yes |
 
-### Identity Management & Aliases
+## Performance & Privacy
+- **Zero Database**: No SQL setup required; uses an optimized JSON flat-file cache.
+- **Background Processing**: All log parsing, stats aggregation, and event persistence happen asynchronously on low-priority background threads to prevent server lag or TPS drops.
+- **Efficient API Delivery**: Utilizes ETag/304 conditional caching and memory-efficient streaming for optimal performance under heavy load.
+- **Crash Resilience**: Precise log parsing capable of intelligently tracking ghost sessions and reconstructing clean timestamps even during unexpected server crashes.
+- **Case-Insensitive Filters**: Robust, unified privacy controls to consistently hide bots, admins, or specific players from public view across all metrics.
 
-You can group multiple players (by name or UUID) into a single "Synthetic Identity" using the `player_aliases` map. This is useful for players with alt accounts or those who have changed their names.
+## Player Aliases
+
+The `player_aliases` config key lets you merge multiple usernames or UUIDs into a single display name without modifying any code. This is the canonical way to handle players who have changed their in-game name, or to represent two accounts as one identity on the dashboard.
+
+### Normalization Order
+
+Every player identifier is resolved in this fixed order:
+
+1. **Raw name** — the name as it appears in the log or stats file.
+2. **`player_aliases` lookup** — the raw name (or UUID) is checked against the map keys (case-insensitive). If a match is found, the mapped value becomes the canonical display name.
+3. **Ignore check** — if the canonical name or UUID appears in `ignored_players`, the entry is excluded from all output.
+
+### Configuration Syntax
+
+Keys can be either a **Minecraft username** or a **UUID** (with or without dashes). Values are the canonical display name shown everywhere on the dashboard.
 
 ```json
-\"player_aliases\": {
-  \"Stickwood_Jr\": \"Stickwood\",
-  \"Stickwood_Alt\": \"Stickwood\",
-  \"Stickwood_Jr_UUID\": \"Stickwood\"
+"player_aliases": {
+  "OldUsername": "NewUsername",
+  "hanger": "Advent/Hanger",
+  "advent": "Advent/Hanger",
+  "550e8400-e29b-41d4-a716-446655440000": "Advent/Hanger"
 }
 ```
 
-When aliases are defined:
-1. All playtime and stats from both accounts are **merged** into the target name (\"Stickwood\").
-2. **Daily Streaks** are shared; activity on any aliased account contributes to the single identity's streak.
-3. The dashboard will display the target name exclusively.
+> **Tip:** When both a username key and a UUID key map to the same display name, the UUID match takes priority (checked first). This ensures the correct identity is used even if the player has changed their name.
 
-### Primary Head Configuration
+### Example: Merging Two Accounts
 
-By default, the dashboard tries to fetch the Minecraft skin head for the display name. If your display name is synthetic (e.g., \"Advent/Hanger\"), you should specify which real Minecraft account should provide the avatar:
+If a player has played under two names, map both to the same canonical name:
 
 ```json
-\"primary_player_heads\": {
-  \"Advent/Hanger\": \"Advent\"
+"player_aliases": {
+  "hanger": "Advent/Hanger",
+  "advent": "Advent/Hanger"
 }
 ```
 
-## Commands
+All historical sessions, leaderboard entries, daily streaks, and profile data for both names will appear under `"Advent/Hanger"` on the dashboard. This ensures that if "Hanger" plays one day and "Advent" plays the next, the combined identity maintains a continuous activity streak.
 
--   `/dashboard status`: Show web server status and port.
--   `/dashboard rebuild`: Manually trigger a full log and stats re-parse.
--   `/dashboard debug rebuild-meta`: Force-clear the player head cache and re-fetch all metadata.
--   `/dashboard event start <title> <type> <hours>`: Start a server event.
--   `/dashboard event stop <id>`: Manually end an event.
+### Primary Player Heads
 
-## API Endpoints
+When merging players into a single synthetic display name that is not a valid Minecraft username (e.g., `"Advent/Hanger"`), Mojang will be unable to directly resolve a player head. While the system attempts to reverse-lookup a valid source name from your `player_aliases` map, you can explicitly define which source player's head should be used by configuring `primary_player_heads`.
 
--   `/api/activity`: Full historical playtime data.
--   `/api/leaderboards`: Statistical rankings.
--   `/api/live`: Current server performance and online players.
--   `/api/events`: Active and historical event data.
+Keys are the canonical display name, and values are the primary Minecraft name or UUID to fetch the head for:
 
-## License
+```json
+"primary_player_heads": {
+  "Advent/Hanger": "Hanger"
+}
+```
 
-MIT
+If you modify this map, use the `/dashboard debug rebuild-meta` command to wipe the head metadata cache and force the server to fetch the updated head on the next web request.

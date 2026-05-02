@@ -43,32 +43,32 @@ public class EventManager {
     private static EventManager instance;
 
     private static final Set<String> OBSIDIAN_IDS = Set.of(
-        \"minecraft:obsidian\",
-        \"minecraft:crying_obsidian\",
-        \"betternether:blue_weeping_obsidian\",
-        \"betternether:weeping_obsidian\",
-        \"betternether:blue_crying_obsidian\",
-        \"betternether:obsidian_bricks\",
-        \"betternether:obsidian_bricks_stairs\",
-        \"betternether:obsidian_bricks_slab\",
-        \"betternether:obsidian_tile\",
-        \"betternether:obsidian_tile_small\",
-        \"betternether:obsidian_tile_stairs\",
-        \"betternether:obsidian_tile_slab\",
-        \"betternether:obsidian_rod_tiles\",
-        \"betternether:obsidian_glass\",
-        \"betternether:obsidian_glass_pane\",
-        \"betternether:blue_obsidian\",
-        \"betternether:blue_obsidian_bricks\",
-        \"betternether:blue_obsidian_bricks_stairs\",
-        \"betternether:blue_obsidian_bricks_slab\",
-        \"betternether:blue_obsidian_tile\",
-        \"betternether:blue_obsidian_tile_small\",
-        \"betternether:blue_obsidian_tile_stairs\",
-        \"betternether:blue_obsidian_tile_slab\",
-        \"betternether:blue_obsidian_rod_tiles\",
-        \"betternether:blue_obsidian_glass\",
-        \"betternether:blue_obsidian_glass_pane\"
+        "minecraft:obsidian",
+        "minecraft:crying_obsidian",
+        "betternether:blue_weeping_obsidian",
+        "betternether:weeping_obsidian",
+        "betternether:blue_crying_obsidian",
+        "betternether:obsidian_bricks",
+        "betternether:obsidian_bricks_stairs",
+        "betternether:obsidian_bricks_slab",
+        "betternether:obsidian_tile",
+        "betternether:obsidian_tile_small",
+        "betternether:obsidian_tile_stairs",
+        "betternether:obsidian_tile_slab",
+        "betternether:obsidian_rod_tiles",
+        "betternether:obsidian_glass",
+        "betternether:obsidian_glass_pane",
+        "betternether:blue_obsidian",
+        "betternether:blue_obsidian_bricks",
+        "betternether:blue_obsidian_bricks_stairs",
+        "betternether:blue_obsidian_bricks_slab",
+        "betternether:blue_obsidian_tile",
+        "betternether:blue_obsidian_tile_small",
+        "betternether:blue_obsidian_tile_stairs",
+        "betternether:blue_obsidian_tile_slab",
+        "betternether:blue_obsidian_rod_tiles",
+        "betternether:blue_obsidian_glass",
+        "betternether:blue_obsidian_glass_pane"
     );
     private final File eventsFile;
     private MinecraftServer server;
@@ -79,7 +79,7 @@ public class EventManager {
     private Map<String, Set<UUID>> syncedObjectives = new HashMap<>(); // objName -> set of player UUIDs
     private Set<String> hiddenScoreboards = ConcurrentHashMap.newKeySet(); // UUIDs of players who hid the sidebar
 
-    private static final Identifier HEADS_FONT_ID = Identifier.of(\"dashboard\", \"heads\");
+    private static final Identifier HEADS_FONT_ID = Identifier.of("dashboard", "heads");
     private static final net.minecraft.text.Style HEADS_STYLE = net.minecraft.text.Style.EMPTY.withFont(HEADS_FONT_ID);
 
     /** Obsidian items/blocks resolved once after server start to avoid per-tick registry scans. */
@@ -95,7 +95,7 @@ public class EventManager {
     private final AtomicInteger saveCompleteCount = new AtomicInteger(0);
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, \"EventManager-Save-Worker\");
+        Thread t = new Thread(r, "EventManager-Save-Worker");
         t.setDaemon(true);
         return t;
     });
@@ -127,7 +127,7 @@ public class EventManager {
     }
 
     private EventManager() {
-        this.eventsFile = new File(FabricLoader.getInstance().getGameDir().toFile(), \"dashboard_events.json\");
+        this.eventsFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_events.json");
         load();
     }
 
@@ -149,7 +149,7 @@ public class EventManager {
         
         Path statsPath = getStatsPath();
         if (!java.nio.file.Files.exists(statsPath)) {
-            FabricDashboardMod.LOGGER.warn(\"[Dashboard] Stats directory not found at: {}. Please check the 'stats_world_name' key in your dashboard-config.json.\", statsPath.toAbsolutePath());
+            FabricDashboardMod.LOGGER.warn("[Dashboard] Stats directory not found at: {}. Please check the 'stats_world_name' key in your dashboard-config.json.", statsPath.toAbsolutePath());
         }
 
         updateScoreboard();
@@ -191,11 +191,11 @@ public class EventManager {
 
     public void startEvent(String title, String type, int durationHours) {
         if (activeEvents.size() >= DashboardConfig.get().max_concurrent_events) {
-            server.getPlayerManager().broadcast(Text.literal(\"§c[Event] Cannot start event: Max concurrent events reached (\" + DashboardConfig.get().max_concurrent_events + \")\"), false);
+            server.getPlayerManager().broadcast(Text.literal("§c[Event] Cannot start event: Max concurrent events reached (" + DashboardConfig.get().max_concurrent_events + ")"), false);
             return;
         }
         if (isActiveTitleInUse(title)) {
-            server.getPlayerManager().broadcast(Text.literal(\"§c[Event] Cannot start event: An active event already uses that title.\"), false);
+            server.getPlayerManager().broadcast(Text.literal("§c[Event] Cannot start event: An active event already uses that title."), false);
             return;
         }
 
@@ -208,7 +208,7 @@ public class EventManager {
             now + (long) durationHours * 60 * 60 * 1000
         );
 
-        if (type.equals(\"fewest_deaths\")) {
+        if (type.equals("fewest_deaths")) {
             event.lowerIsBetter = true;
         }
 
@@ -225,12 +225,12 @@ public class EventManager {
         new Thread(() -> {
             com.playtime.dashboard.util.PlayerHeadFontManager.buildRespack();
             com.playtime.dashboard.util.PlayerHeadFontManager.zipRespack();
-        }, \"Dashboard-Respack-Builder\").start();
+        }, "Dashboard-Respack-Builder").start();
 
         updateScoreboard();
         
-        server.getPlayerManager().broadcast(Text.literal(\"§6[Event] §aNew event started: §l\" + title), false);
-        server.getPlayerManager().broadcast(Text.literal(\"§6[Event] §eGoal: \" + type.replace(\"_\", \" \") + \" for \" + durationHours + \" hours!\"), false);
+        server.getPlayerManager().broadcast(Text.literal("§6[Event] §aNew event started: §l" + title), false);
+        server.getPlayerManager().broadcast(Text.literal("§6[Event] §eGoal: " + type.replace("_", " ") + " for " + durationHours + " hours!"), false);
     }
 
     public boolean isActiveTitleInUse(String title) {
@@ -293,11 +293,11 @@ public class EventManager {
     private void takeStatsSnapshot(ServerEvent event) {
         com.playtime.dashboard.util.UuidCache.getInstance().forceRefresh();
         Path statsDir = getStatsPath();
-        File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(\".json\"));
+        File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
         Set<String> snapshotTaken = new HashSet<>();
         if (files != null) {
             for (File statFile : files) {
-                String uuidStr = statFile.getName().replace(\".json\", \"\");
+                String uuidStr = statFile.getName().replace(".json", "");
                 event.initialStats.put(uuidStr, getStatValueFromDisk(statFile, event.type));
                 snapshotTaken.add(uuidStr);
             }
@@ -317,7 +317,7 @@ public class EventManager {
     }
 
     private Path getStatsPath() {
-        return server.getRunDirectory().resolve(DashboardConfig.get().stats_world_name).resolve(\"stats\");
+        return server.getRunDirectory().resolve(DashboardConfig.get().stats_world_name).resolve("stats");
     }
 
     public void tick() {
@@ -337,11 +337,11 @@ public class EventManager {
     private void updateScores(ServerEvent event) {
         com.playtime.dashboard.util.UuidCache.getInstance().refresh();
         Path statsDir = getStatsPath();
-        File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(\".json\"));
+        File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
         Set<String> updated = new HashSet<>();
         if (files != null) {
             for (File statFile : files) {
-                String uuidStr = statFile.getName().replace(\".json\", \"\");
+                String uuidStr = statFile.getName().replace(".json", "");
                 updatePlayerScore(event, uuidStr, getStatValueFromDisk(statFile, event.type));
                 updated.add(uuidStr);
             }
@@ -371,9 +371,9 @@ public class EventManager {
         if (!event.initialStats.containsKey(uuidStr)) event.initialStats.put(uuidStr, currentValue);
         int score = currentValue - event.initialStats.get(uuidStr);
         
-        if (event.type.equals(\"playtime\")) score /= 20;
-        else if (event.type.equals(\"damage_dealt\")) score /= 10;
-        else if (event.type.equals(\"daily_streak\")) score = currentValue;
+        if (event.type.equals("playtime")) score /= 20;
+        else if (event.type.equals("damage_dealt")) score /= 10;
+        else if (event.type.equals("daily_streak")) score = currentValue;
         
         if (score >= 0 || event.lowerIsBetter) {
             Integer oldScore = event.currentScores.put(uuidStr, score);
@@ -385,19 +385,19 @@ public class EventManager {
 
     private int getStatValueFromPlayer(ServerPlayerEntity player, String type) {
         switch (type) {
-            case \"playtime\": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.PLAY_TIME);
-            case \"mob_kills\": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.MOB_KILLS);
-            case \"fewest_deaths\": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.DEATHS);
-            case \"damage_dealt\": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.DAMAGE_DEALT);
-            case \"player_kills\": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.PLAYER_KILLS);
-            case \"fish_caught\":
+            case "playtime": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.PLAY_TIME);
+            case "mob_kills": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.MOB_KILLS);
+            case "fewest_deaths": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.DEATHS);
+            case "damage_dealt": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.DAMAGE_DEALT);
+            case "player_kills": return player.getStatHandler().getStat(Stats.CUSTOM, Stats.PLAYER_KILLS);
+            case "fish_caught":
                 int vFish = player.getStatHandler().getStat(Stats.CUSTOM, Stats.FISH_CAUGHT);
-                return vFish + (FabricLoader.getInstance().isModLoaded(\"tide\") ? sumTideFromPlayer(player) : 0);
-            case \"daily_streak\": return StreakTracker.getInstance().getStreak(player.getUuid().toString());
-            case \"blocks_placed\": return sumCategoryPlayer(player, Stats.USED, true);
-            case \"blocks_mined\": return sumCategoryPlayer(player, Stats.MINED, false);
-            case \"obsidian_placed\": return sumIdSetFromPlayer(player, true);
-            case \"obsidian_mined\": return sumIdSetFromPlayer(player, false);
+                return vFish + (FabricLoader.getInstance().isModLoaded("tide") ? sumTideFromPlayer(player) : 0);
+            case "daily_streak": return StreakTracker.getInstance().getStreak(player.getUuid().toString());
+            case "blocks_placed": return sumCategoryPlayer(player, Stats.USED, true);
+            case "blocks_mined": return sumCategoryPlayer(player, Stats.MINED, false);
+            case "obsidian_placed": return sumIdSetFromPlayer(player, true);
+            case "obsidian_mined": return sumIdSetFromPlayer(player, false);
             default: return 0;
         }
     }
@@ -422,7 +422,7 @@ public class EventManager {
         if (type == Stats.USED) {
             StatType<Item> itemType = (StatType<Item>) type;
             for (Item item : itemType.getRegistry()) {
-                if (blocksOnly && !Registries.ITEM.getId(item).toString().contains(\":\")) continue; // basic filter
+                if (blocksOnly && !Registries.ITEM.getId(item).toString().contains(":")) continue; // basic filter
                 sum += player.getStatHandler().getStat(itemType, item);
             }
         } else if (type == Stats.MINED) {
@@ -434,21 +434,21 @@ public class EventManager {
         return sum;
     }
 
-    private static final java.util.function.Predicate<String> NAMESPACED_ID_FILTER = id -> id != null && id.contains(\":\");
+    private static final java.util.function.Predicate<String> NAMESPACED_ID_FILTER = id -> id != null && id.contains(":");
 
     private int getStatValueFromDisk(File statFile, String type) {
         switch (type) {
-            case \"playtime\": return readSingleStat(statFile, \"minecraft:custom\", \"minecraft:play_time\");
-            case \"mob_kills\": return readSingleStat(statFile, \"minecraft:custom\", \"minecraft:mob_kills\");
-            case \"fewest_deaths\": return readSingleStat(statFile, \"minecraft:custom\", \"minecraft:deaths\");
-            case \"damage_dealt\": return readSingleStat(statFile, \"minecraft:custom\", \"minecraft:damage_dealt\");
-            case \"player_kills\": return readSingleStat(statFile, \"minecraft:custom\", \"minecraft:player_kills\");
-            case \"fish_caught\": return readFishCaughtFromDisk(statFile, FabricLoader.getInstance().isModLoaded(\"tide\"));
-            case \"daily_streak\": return StreakTracker.getInstance().getStreak(statFile.getName().replace(\".json\", \"\"));
-            case \"blocks_placed\": return sumCategoryFiltered(statFile, \"minecraft:used\", NAMESPACED_ID_FILTER);
-            case \"blocks_mined\": return sumCategoryFiltered(statFile, \"minecraft:mined\", null);
-            case \"obsidian_placed\": return sumCategoryFiltered(statFile, \"minecraft:used\", OBSIDIAN_IDS::contains);
-            case \"obsidian_mined\": return sumCategoryFiltered(statFile, \"minecraft:mined\", OBSIDIAN_IDS::contains);
+            case "playtime": return readSingleStat(statFile, "minecraft:custom", "minecraft:play_time");
+            case "mob_kills": return readSingleStat(statFile, "minecraft:custom", "minecraft:mob_kills");
+            case "fewest_deaths": return readSingleStat(statFile, "minecraft:custom", "minecraft:deaths");
+            case "damage_dealt": return readSingleStat(statFile, "minecraft:custom", "minecraft:damage_dealt");
+            case "player_kills": return readSingleStat(statFile, "minecraft:custom", "minecraft:player_kills");
+            case "fish_caught": return readFishCaughtFromDisk(statFile, FabricLoader.getInstance().isModLoaded("tide"));
+            case "daily_streak": return StreakTracker.getInstance().getStreak(statFile.getName().replace(".json", ""));
+            case "blocks_placed": return sumCategoryFiltered(statFile, "minecraft:used", NAMESPACED_ID_FILTER);
+            case "blocks_mined": return sumCategoryFiltered(statFile, "minecraft:mined", null);
+            case "obsidian_placed": return sumCategoryFiltered(statFile, "minecraft:used", OBSIDIAN_IDS::contains);
+            case "obsidian_mined": return sumCategoryFiltered(statFile, "minecraft:mined", OBSIDIAN_IDS::contains);
             default: return 0;
         }
     }
@@ -457,7 +457,7 @@ public class EventManager {
         try (JsonReader r = new JsonReader(new FileReader(statFile))) {
             r.beginObject();
             while (r.hasNext()) {
-                if (!\"stats\".equals(r.nextName())) { r.skipValue(); continue; }
+                if (!"stats".equals(r.nextName())) { r.skipValue(); continue; }
                 r.beginObject();
                 while (r.hasNext()) {
                     if (!category.equals(r.nextName())) { r.skipValue(); continue; }
@@ -479,7 +479,7 @@ public class EventManager {
         try (JsonReader r = new JsonReader(new FileReader(statFile))) {
             r.beginObject();
             while (r.hasNext()) {
-                if (!\"stats\".equals(r.nextName())) { r.skipValue(); continue; }
+                if (!"stats".equals(r.nextName())) { r.skipValue(); continue; }
                 r.beginObject();
                 while (r.hasNext()) {
                     if (!category.equals(r.nextName())) { r.skipValue(); continue; }
@@ -502,22 +502,22 @@ public class EventManager {
         try (JsonReader r = new JsonReader(new FileReader(statFile))) {
             r.beginObject();
             while (r.hasNext()) {
-                if (!\"stats\".equals(r.nextName())) { r.skipValue(); continue; }
+                if (!"stats".equals(r.nextName())) { r.skipValue(); continue; }
                 r.beginObject();
                 while (r.hasNext()) {
                     String cat = r.nextName();
-                    if (\"minecraft:custom\".equals(cat)) {
+                    if ("minecraft:custom".equals(cat)) {
                         r.beginObject();
                         while (r.hasNext()) {
-                            if (\"minecraft:fish_caught\".equals(r.nextName())) total += (int) r.nextLong();
+                            if ("minecraft:fish_caught".equals(r.nextName())) total += (int) r.nextLong();
                             else r.skipValue();
                         }
                         r.endObject();
-                    } else if (includeTide && \"minecraft:used\".equals(cat)) {
+                    } else if (includeTide && "minecraft:used".equals(cat)) {
                         r.beginObject();
                         while (r.hasNext()) {
                             String id = r.nextName();
-                            if (id.startsWith(\"tide:\")) total += (int) r.nextLong();
+                            if (id.startsWith("tide:")) total += (int) r.nextLong();
                             else r.skipValue();
                         }
                         r.endObject();
@@ -534,7 +534,7 @@ public class EventManager {
     private int sumTideFromPlayer(ServerPlayerEntity player) {
         int sum = 0;
         for (Item item : Registries.ITEM) {
-            if (Registries.ITEM.getId(item).getNamespace().equals(\"tide\")) {
+            if (Registries.ITEM.getId(item).getNamespace().equals("tide")) {
                 sum += player.getStatHandler().getStat(Stats.USED, item);
             }
         }
@@ -572,7 +572,7 @@ public class EventManager {
         for (ServerEvent event : activeEvents) {
             String objName = getObjectiveName(event.id);
             if (scoreboard.getNullableObjective(objName) == null) {
-                scoreboard.addObjective(objName, ScoreboardCriterion.DUMMY, Text.literal(\"§6§l\" + event.title), ScoreboardCriterion.RenderType.INTEGER, false, null);
+                scoreboard.addObjective(objName, ScoreboardCriterion.DUMMY, Text.literal("§6§l" + event.title), ScoreboardCriterion.RenderType.INTEGER, false, null);
             }
             updateObjectiveContent(event, scoreboard.getNullableObjective(objName));
         }
@@ -611,9 +611,9 @@ public class EventManager {
 
             long remainingMs = displayEvent.endTime - System.currentTimeMillis();
             int remainingSeconds = (int) Math.max(0, remainingMs / 1000);
-            net.minecraft.text.MutableText timerText = Text.literal(\"§b§lTime Left: §r§f\" + formatTime(remainingSeconds));
+            net.minecraft.text.MutableText timerText = Text.literal("§b§lTime Left: §r§f" + formatTime(remainingSeconds));
             player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
-                \"_time_remaining_\",
+                "_time_remaining_",
                 obj.getName(),
                 Integer.MAX_VALUE,
                 Optional.of(timerText),
@@ -639,14 +639,14 @@ public class EventManager {
                 if (!glyph.isEmpty()) {
                     text.append(Text.literal(glyph).setStyle(HEADS_STYLE));
                 }
-                text.append(Text.literal(\" §f\" + name));
+                text.append(Text.literal(" §f" + name));
 
                 player.networkHandler.sendPacket(new ScoreboardScoreUpdateS2CPacket(
                     name,
                     obj.getName(),
                     internalScore,
                     Optional.of(text),
-                    Optional.of(new FixedNumberFormat(Text.literal(\"§e\" + formatStr)))
+                    Optional.of(new FixedNumberFormat(Text.literal("§e" + formatStr)))
                 ));
                 sendState.scores.put(name, internalScore);
                 sendState.formats.put(name, formatStr);
@@ -666,24 +666,24 @@ public class EventManager {
             if (!glyph.isEmpty()) {
                 text.append(Text.literal(glyph).setStyle(HEADS_STYLE));
             }
-            text.append(Text.literal(\" §f\" + name));
+            text.append(Text.literal(" §f" + name));
 
             score.setDisplayText(text);
-            score.setNumberFormat(new FixedNumberFormat(Text.literal(\"§e\" + formatScoreValue(event, val))));
+            score.setNumberFormat(new FixedNumberFormat(Text.literal("§e" + formatScoreValue(event, val))));
             score.setScore(event.lowerIsBetter ? Integer.MAX_VALUE - val : val);
         });
     }
 
-    private String getObjectiveName(String eventId) { return \"ev_\" + eventId.substring(0, Math.min(8, eventId.length())); }
+    private String getObjectiveName(String eventId) { return "ev_" + eventId.substring(0, Math.min(8, eventId.length())); }
 
     private String formatTime(int seconds) {
         int d = seconds / 86400, h = (seconds % 86400) / 3600, m = (seconds % 3600) / 60, s = seconds % 60;
-        return (d > 0 ? d + \"d \" : \"\") + (h > 0 || d > 0 ? h + \"h \" : \"\") + (m > 0 || h > 0 || d > 0 ? m + \"m \" : \"\") + s + \"s\";
+        return (d > 0 ? d + "d " : "") + (h > 0 || d > 0 ? h + "h " : "") + (m > 0 || h > 0 || d > 0 ? m + "m " : "") + s + "s";
     }
 
     private String formatScoreValue(ServerEvent event, int val) {
-        if (event.type.equals(\"playtime\")) return formatTime(val);
-        if (event.type.equals(\"damage_dealt\")) return val + \" ❤\";
+        if (event.type.equals("playtime")) return formatTime(val);
+        if (event.type.equals("damage_dealt")) return val + " ❤";
         return String.valueOf(val);
     }
 
@@ -758,6 +758,10 @@ public class EventManager {
             if (byName != null) return byName;
         }
 
+        if (name.equalsIgnoreCase("hanger") || name.equalsIgnoreCase("advent")) {
+            return "Advent/Hanger";
+        }
+
         return name;
     }
 
@@ -765,26 +769,26 @@ public class EventManager {
         if (!eventsFile.exists()) return;
         try (FileReader reader = new FileReader(eventsFile)) {
             JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
-            if (data.has(\"activeEvents\")) {
-                List<ServerEvent> loaded = GSON.fromJson(data.get(\"activeEvents\"), new TypeToken<List<ServerEvent>>(){}.getType());
+            if (data.has("activeEvents")) {
+                List<ServerEvent> loaded = GSON.fromJson(data.get("activeEvents"), new TypeToken<List<ServerEvent>>(){}.getType());
                 if (loaded != null) activeEvents = new CopyOnWriteArrayList<>(loaded);
             }
-            if (data.has(\"playerPreferences\")) {
-                Map<String, String> loaded = GSON.fromJson(data.get(\"playerPreferences\"), new TypeToken<Map<String, String>>(){}.getType());
+            if (data.has("playerPreferences")) {
+                Map<String, String> loaded = GSON.fromJson(data.get("playerPreferences"), new TypeToken<Map<String, String>>(){}.getType());
                 if (loaded != null) playerPreferences = new HashMap<>(loaded);
             }
-            if (data.has(\"allTimePoints\")) {
-                Map<String, Integer> loaded = GSON.fromJson(data.get(\"allTimePoints\"), new TypeToken<Map<String, Integer>>(){}.getType());
+            if (data.has("allTimePoints")) {
+                Map<String, Integer> loaded = GSON.fromJson(data.get("allTimePoints"), new TypeToken<Map<String, Integer>>(){}.getType());
                 if (loaded != null) allTimePoints = new ConcurrentHashMap<>(loaded);
             }
-            if (data.has(\"hiddenScoreboards\")) {
-                Set<String> loaded = GSON.fromJson(data.get(\"hiddenScoreboards\"), new TypeToken<Set<String>>(){}.getType());
+            if (data.has("hiddenScoreboards")) {
+                Set<String> loaded = GSON.fromJson(data.get("hiddenScoreboards"), new TypeToken<Set<String>>(){}.getType());
                 if (loaded != null) {
                     hiddenScoreboards = ConcurrentHashMap.newKeySet();
                     hiddenScoreboards.addAll(loaded);
                 }
             }
-        } catch (Exception e) { FabricDashboardMod.LOGGER.error(\"Failed to load events data\", e); }
+        } catch (Exception e) { FabricDashboardMod.LOGGER.error("Failed to load events data", e); }
         if (activeEvents == null) activeEvents = new CopyOnWriteArrayList<>();
         if (playerPreferences == null) playerPreferences = new HashMap<>();
         if (allTimePoints == null) allTimePoints = new ConcurrentHashMap<>();
@@ -810,35 +814,35 @@ public class EventManager {
     private synchronized void performSave(List<ServerEvent> activeEvents, Map<String, String> playerPreferences, Map<String, Integer> allTimePoints, Set<String> hiddenScoreboards) {
         try (FileWriter writer = new FileWriter(eventsFile)) {
             JsonObject data = new JsonObject();
-            data.add(\"activeEvents\", GSON.toJsonTree(activeEvents));
-            data.add(\"playerPreferences\", GSON.toJsonTree(playerPreferences));
-            data.add(\"allTimePoints\", GSON.toJsonTree(allTimePoints));
-            data.add(\"hiddenScoreboards\", GSON.toJsonTree(hiddenScoreboards));
+            data.add("activeEvents", GSON.toJsonTree(activeEvents));
+            data.add("playerPreferences", GSON.toJsonTree(playerPreferences));
+            data.add("allTimePoints", GSON.toJsonTree(allTimePoints));
+            data.add("hiddenScoreboards", GSON.toJsonTree(hiddenScoreboards));
             GSON.toJson(data, writer);
             saveCompleteCount.incrementAndGet();
-            FabricDashboardMod.LOGGER.info(\"[Dashboard] Save #{} complete — {} events, {} points entries\",
+            FabricDashboardMod.LOGGER.info("[Dashboard] Save #{} complete — {} events, {} points entries",
                 saveCompleteCount.get(), activeEvents.size(), allTimePoints.size());
-        } catch (IOException e) { FabricDashboardMod.LOGGER.error(\"Failed to save events data\", e); }
+        } catch (IOException e) { FabricDashboardMod.LOGGER.error("Failed to save events data", e); }
     }
 
     public void shutdown() {
-        FabricDashboardMod.LOGGER.info(\"[Dashboard] shutdown() called — flushing final save\");
+        FabricDashboardMod.LOGGER.info("[Dashboard] shutdown() called — flushing final save");
         save();
         executor.shutdown();
         try {
             boolean finished = executor.awaitTermination(30, TimeUnit.SECONDS);
             if (finished) {
-                FabricDashboardMod.LOGGER.info(\"[Dashboard] shutdown() complete — executor finished cleanly\");
+                FabricDashboardMod.LOGGER.info("[Dashboard] shutdown() complete — executor finished cleanly");
             } else {
-                FabricDashboardMod.LOGGER.warn(\"[Dashboard] shutdown() timed out after 30s — file may be incomplete!\");
+                FabricDashboardMod.LOGGER.warn("[Dashboard] shutdown() timed out after 30s — file may be incomplete!");
             }
         } catch (InterruptedException e) {
-            FabricDashboardMod.LOGGER.error(\"[Dashboard] shutdown() interrupted — final save may be lost!\", e);
+            FabricDashboardMod.LOGGER.error("[Dashboard] shutdown() interrupted — final save may be lost!", e);
             Thread.currentThread().interrupt();
         }
     }
 
-    private boolean isUUID(String s) { return s != null && s.matches(\"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$\"); }
+    private boolean isUUID(String s) { return s != null && s.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"); }
 
     private void distributePoints(ServerEvent event) {
         List<Map.Entry<String, Integer>> sorted = event.currentScores.entrySet().stream()
@@ -853,7 +857,7 @@ public class EventManager {
     }
 
     private void broadcastEventResults(ServerEvent event) {
-        server.getPlayerManager().broadcast(Text.literal(\"§6[Event] §cEvent ended: §l\" + event.title), false);
+        server.getPlayerManager().broadcast(Text.literal("§6[Event] §cEvent ended: §l" + event.title), false);
 
         List<Map.Entry<String, Integer>> ranked = event.currentScores.entrySet().stream()
             .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
@@ -861,7 +865,7 @@ public class EventManager {
             .collect(Collectors.toList());
 
         if (ranked.isEmpty()) {
-            server.getPlayerManager().broadcast(Text.literal(\"§7No qualifying scores recorded.\"), false);
+            server.getPlayerManager().broadcast(Text.literal("§7No qualifying scores recorded."), false);
             return;
         }
 
@@ -870,13 +874,13 @@ public class EventManager {
             String playerName = getPlayerName(entry.getKey());
             int val = entry.getValue();
             String scoreStr;
-            if (event.type.equals(\"playtime\")) scoreStr = formatTime(val);
-            else if (event.type.equals(\"damage_dealt\")) scoreStr = val + \" ❤\";
+            if (event.type.equals("playtime")) scoreStr = formatTime(val);
+            else if (event.type.equals("damage_dealt")) scoreStr = val + " ❤";
             else scoreStr = String.valueOf(val);
             int pointsAwarded = i < 3 ? (3 - i) : 0;
-            String pointsStr = pointsAwarded > 0 ? \" §6(+\" + pointsAwarded + \" pts)\" : \"\";
+            String pointsStr = pointsAwarded > 0 ? " §6(+" + pointsAwarded + " pts)" : "";
             server.getPlayerManager().broadcast(
-                Text.literal(\"§e#\" + (i + 1) + \" §f\" + playerName + \" §7- §a\" + scoreStr + pointsStr),
+                Text.literal("§e#" + (i + 1) + " §f" + playerName + " §7- §a" + scoreStr + pointsStr),
                 false
             );
         }
