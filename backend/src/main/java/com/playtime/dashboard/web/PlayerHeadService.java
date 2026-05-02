@@ -1,92 +1,75 @@
 package com.playtime.dashboard.web;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
 import com.playtime.dashboard.FabricDashboardMod;
 import com.playtime.dashboard.config.DashboardConfig;
+import com.playtime.dashboard.util.UuidCache;
 
-import javax.imageio.ImageIO;
-import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.io.*;
-import java.lang.reflect.Type;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.Base64;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 
-/**
- * Fetches Minecraft player skins from Mojang, crops the face region,
- * extracts a dominant color, and caches everything to disk.
- *
- * <p>Design goals:
- * <ul>
- *   <li>Minimal memory — faces are written to disk immediately, never held in memory</li>
- *   <li>All network/IO on a single background thread — never blocks the server tick</li>
- *   <li>Persistent meta.json survives restarts</li>
- *   <li>24-hour TTL before re-fetching (configurable)</li>
- *   <li>Rate-limit safe: 500ms delay between Mojang API calls</li>
- * </ul>
- */
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonElement;
+
 public class PlayerHeadService {
-
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Type META_MAP_TYPE = new TypeToken<ConcurrentHashMap<String, PlayerMeta>>() {}.getType();
-
-    /** Delay between consecutive Mojang API requests to stay under rate limits (~600 req/10 min). */
-    private static final long FETCH_DELAY_MS = 500;
-
-    /** Short TTL for failed fetches so they retry sooner (10 minutes). */
-    private static final long FAILED_FETCH_TTL_MS = 10 * 60 * 1000L;
+    private static final String FACES_DIR_NAME = "dashboard_faces";
+    private static final String META_FILE_NAME = "meta.json";
+    private static final int FETCH_DELAY_MS = 2000; // Rate limit safety
+    private static final long FAILED_FETCH_TTL_MS = 30 * 60_000L; // 30 mins
 
     private final File facesDir;
     private final File metaFile;
-    private final ConcurrentHashMap<String, PlayerMeta> metaMap = new ConcurrentHashMap<>();
-    /** Tracks player names currently queued or in-flight to prevent duplicate fetches. */
+    private final Map<String, PlayerMeta> metaMap = new ConcurrentHashMap<>();
     private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "PlayerHeadService");
+        Thread t = new Thread(r, "PlayerHeadFetcher");
         t.setDaemon(true);
         return t;
     });
+
     private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.ALWAYS)
             .build();
 
-    /** Default Steve head bytes — loaded once from classpath at init, never re-read. */
     private final byte[] defaultHeadBytes;
 
-    /** Lightweight metadata per player — the only thing kept in memory. */
     public static class PlayerMeta {
-        public String uuid;
-        public String colorHex = "#888888";
+        public String lastSkinUrl;
         public long lastFetchedEpoch;
-        /** Set to true when the fetch failed (rate limit, network error). Uses shorter TTL for retry. */
-        public transient boolean fetchFailed = false;
+        public boolean fetchFailed;
     }
 
     public PlayerHeadService(File gameDir) {
-        this.facesDir = new File(gameDir, "dashboard_faces");
-        this.metaFile = new File(facesDir, "meta.json");
-        if (!facesDir.exists()) {
-            facesDir.mkdirs();
-        }
+        this.facesDir = new File(gameDir, FACES_DIR_NAME);
+        if (!facesDir.exists()) facesDir.mkdirs();
+        this.metaFile = new File(facesDir, META_FILE_NAME);
 
-        // Load default head from classpath once at init
-        byte[] defaultBytes = null;
-        try (InputStream is = getClass().getResourceAsStream("/web/default_head.png")) {
+        byte[] defaultBytes = new byte[0];
+        try (InputStream is = getClass().getResourceAsStream("/assets/dashboard/default_head.png")) {
             if (is != null) {
-                ByteArrayOutputStream bos = new ByteArrayOutputStream(512);
-                byte[] buf = new byte[1024];
-                int n;
-                while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
-                defaultBytes = bos.toByteArray();
-            } else {
-                FabricDashboardMod.LOGGER.warn("default_head.png not found in resources at init");
+                defaultBytes = is.readAllBytes();
             }
         } catch (IOException e) {
             FabricDashboardMod.LOGGER.error("Failed to load default_head.png from resources", e);
@@ -96,7 +79,7 @@ public class PlayerHeadService {
         loadMeta();
     }
 
-    // ── Public API ──────────────────────────────────────────────
+    // \u2500\u2500 Public API \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 
     /** Kick off background fetches for a collection of known player names. */
     public void fetchAllKnown(Collection<String> playerNames) {
@@ -139,79 +122,85 @@ public class PlayerHeadService {
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
-                FabricDashboardMod.LOGGER.warn("Failed to fetch head for " + playerName + ": " + e.getMessage());
-                // Mark as failed with short TTL so it retries in 10 minutes, not 24 hours
-                markFetchFailed(playerName);
+                FabricDashboardMod.LOGGER.error("Background fetch failed for " + playerName, e);
             } finally {
                 inFlight.remove(playerName);
             }
         });
     }
 
-    /** Returns the cached face PNG file for a player, or null if not yet fetched. */
-    public File getFaceFile(String playerName) {
-        File f = new File(facesDir, sanitizeFilename(playerName) + ".png");
-        return f.exists() ? f : null;
-    }
-
-    /** Returns the cached full skin PNG file for a player, or null if not yet fetched. */
-    public File getFullSkinFile(String playerName) {
-        File f = new File(facesDir, sanitizeFilename(playerName) + "_skin.png");
-        return f.exists() ? f : null;
-    }
-
-    /** Returns the default head bytes (loaded once from classpath). */
-    public byte[] getDefaultHeadBytes() {
+    public byte[] getFaceBytes(String playerName) {
+        File file = new File(facesDir, sanitizeFilename(playerName) + ".png");
+        if (file.exists()) {
+            try {
+                return java.nio.file.Files.readAllBytes(file.toPath());
+            } catch (IOException ignored) {}
+        }
         return defaultHeadBytes;
     }
 
-    /** Returns an unmodifiable view of the meta map. The backing map is concurrent. */
-    public Map<String, PlayerMeta> getColorMap() {
-        return java.util.Collections.unmodifiableMap(metaMap);
+    public byte[] getSkinBytes(String playerName) {
+        File file = new File(facesDir, sanitizeFilename(playerName) + "_skin.png");
+        if (file.exists()) {
+            try {
+                return java.nio.file.Files.readAllBytes(file.toPath());
+            } catch (IOException ignored) {}
+        }
+        // If skin missing, return default head as a fallback
+        return defaultHeadBytes;
     }
 
-    /** Shutdown the background executor cleanly. */
-    public void shutdown() {
-        executor.shutdownNow();
+    public void clearCache() {
+        metaMap.clear();
+        saveMeta();
+        FabricDashboardMod.LOGGER.info("PlayerHeadService cache cleared.");
     }
 
-    // ── Internal pipeline ───────────────────────────────────────
+    // \u2500\u2500 Internal Logic \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 
-    private void fetchPlayer(String playerName) throws Exception {
-        FabricDashboardMod.LOGGER.info("Fetching player head for: " + playerName);
+    private void fetchPlayer(String playerName) {
+        try {
+            FabricDashboardMod.LOGGER.info("Fetching player head for: " + playerName);
+            String uuid = resolveUUID(playerName);
+            if (uuid == null) {
+                FabricDashboardMod.LOGGER.warn("Could not resolve UUID for " + playerName + ", using default head.");
+                writeDefaultHead(playerName);
+                return;
+            }
 
-        // Step 1: Username → UUID
-        String uuid = resolveUUID(playerName);
-        if (uuid == null) {
-            FabricDashboardMod.LOGGER.warn("Could not resolve UUID for " + playerName + ", using default head.");
-            writeDefaultHead(playerName);
-            return;
+            String skinUrl = fetchSkinUrl(uuid);
+            if (skinUrl == null) {
+                FabricDashboardMod.LOGGER.warn("Could not find skin URL for " + playerName + " (" + uuid + ")");
+                writeDefaultHead(playerName);
+                return;
+            }
+
+            // Download and process
+            byte[] skinData = downloadBytes(skinUrl);
+            fetchAndCropFace(playerName, skinData);
+
+            // Success
+            PlayerMeta meta = new PlayerMeta();
+            meta.lastSkinUrl = skinUrl;
+            meta.lastFetchedEpoch = System.currentTimeMillis();
+            meta.fetchFailed = false;
+            metaMap.put(playerName, meta);
+            saveMeta();
+            FabricDashboardMod.LOGGER.info("Successfully fetched and cached head for: " + playerName);
+
+        } catch (Exception e) {
+            FabricDashboardMod.LOGGER.warn("Failed to fetch player head for " + playerName + ": " + e.getMessage());
+            PlayerMeta meta = new PlayerMeta();
+            meta.lastFetchedEpoch = System.currentTimeMillis();
+            meta.fetchFailed = true;
+            metaMap.put(playerName, meta);
+            saveMeta();
         }
-
-        // Step 2: UUID → skin URL (add delay between API calls)
-        Thread.sleep(FETCH_DELAY_MS);
-        String skinUrl = fetchSkinUrl(uuid);
-        if (skinUrl == null) {
-            FabricDashboardMod.LOGGER.warn("Could not resolve skin URL for " + playerName + " (UUID: " + uuid + "), using default head.");
-            writeDefaultHead(playerName);
-            return;
-        }
-
-        // Step 3: Download skin, crop face, extract color, save to disk
-        fetchAndCropFace(skinUrl, playerName, uuid);
-
-        FabricDashboardMod.LOGGER.info("Successfully fetched and cached head for: " + playerName);
     }
 
     private String resolveUUID(String playerName) throws Exception {
-        String lookupName = playerName;
-        if ("Advent/Hanger".equals(playerName)) {
-            lookupName = "Advent";
-        }
-        
-        return com.playtime.dashboard.util.UuidCache.getInstance()
-                .getUuid(lookupName)
-                .map(UUID::toString)
+        return DashboardConfig.get().resolvePrimaryUuid(playerName)
+                .map(java.util.UUID::toString)
                 .map(s -> s.replace("-", ""))
                 .orElse(null);
     }
@@ -220,287 +209,119 @@ public class PlayerHeadService {
         String url = "https://sessionserver.mojang.com/session/minecraft/profile/" + uuid;
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .GET()
-                .timeout(Duration.ofSeconds(10))
                 .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        // 429 = rate limited
-        if (response.statusCode() == 429) {
-            throw new IOException("Mojang session API rate limit hit for UUID " + uuid);
-        }
         if (response.statusCode() != 200) return null;
 
-        com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject();
-        com.google.gson.JsonArray properties = root.getAsJsonArray("properties");
-        if (properties == null) return null;
+        JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
+        if (!json.has("properties")) return null;
 
-        for (com.google.gson.JsonElement prop : properties) {
-            com.google.gson.JsonObject p = prop.getAsJsonObject();
-            if ("textures".equals(p.get("name").getAsString())) {
-                String decoded = new String(Base64.getDecoder().decode(p.get("value").getAsString()));
-                com.google.gson.JsonObject texturesRoot = com.google.gson.JsonParser.parseString(decoded)
-                        .getAsJsonObject();
-                com.google.gson.JsonObject textures = texturesRoot.getAsJsonObject("textures");
-                if (textures != null && textures.has("SKIN")) {
-                    return textures.getAsJsonObject("SKIN").get("url").getAsString();
-                }
+        for (JsonElement prop : json.getAsJsonArray("properties")) {
+            JsonObject obj = prop.getAsJsonObject();
+            if ("textures".equals(obj.get("name").getAsString())) {
+                String base64 = obj.get("value").getAsString();
+                String decoded = new String(Base64.getDecoder().decode(base64));
+                JsonObject textures = JsonParser.parseString(decoded).getAsJsonObject();
+                return textures.getAsJsonObject("textures")
+                        .getAsJsonObject("SKIN")
+                        .get("url").getAsString();
             }
         }
         return null;
     }
 
-    private void fetchAndCropFace(String skinUrl, String playerName, String uuid) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(skinUrl))
-                .GET()
-                .timeout(Duration.ofSeconds(15))
-                .build();
+    private byte[] downloadBytes(String url) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).build();
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray()).body();
+    }
 
-        HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        if (response.statusCode() != 200) {
-            writeDefaultHead(playerName);
-            return;
-        }
+    private void fetchAndCropFace(String playerName, byte[] skinData) throws IOException {
+        java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(skinData);
+        BufferedImage skin = ImageIO.read(bais);
+        if (skin == null) throw new IOException("Invalid skin image data");
 
-        BufferedImage skin;
-        try (InputStream is = response.body()) {
-            skin = ImageIO.read(is);
-        }
-        if (skin == null) {
-            writeDefaultHead(playerName);
-            return;
-        }
-
-        // Base face layer: (8,8) 8×8
-        BufferedImage face = skin.getSubimage(8, 8, 8, 8);
-
-        // Hat/overlay layer: (40,8) 8×8 — composite on top
-        BufferedImage hat = skin.getSubimage(40, 8, 8, 8);
-
-        // Scale to 32×32 and composite
-        BufferedImage result = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = result.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.drawImage(face, 0, 0, 32, 32, null);
-        g.drawImage(hat, 0, 0, 32, 32, null);
-        g.dispose();
-
-        // Extract dominant color from face pixels using quantized mode approach
-        String colorHex = extractDominantColor(face);
-
-        // Write face PNG to disk
-        File outFile = new File(facesDir, sanitizeFilename(playerName) + ".png");
-        ImageIO.write(result, "PNG", outFile);
-
-        // Write full skin PNG to disk for the 3D viewer
+        // Save full skin
         File skinFile = new File(facesDir, sanitizeFilename(playerName) + "_skin.png");
-        ImageIO.write(skin, "PNG", skinFile);
+        ImageIO.write(skin, "png", skinFile);
 
-        // Update meta
-        PlayerMeta meta = new PlayerMeta();
-        meta.uuid = uuid;
-        meta.colorHex = colorHex;
-        meta.lastFetchedEpoch = System.currentTimeMillis();
-        meta.fetchFailed = false;
-        metaMap.put(playerName, meta);
-        saveMeta();
-
-        // Let the images be GC'd immediately
-        skin.flush();
-        face.flush();
-        hat.flush();
-        result.flush();
-    }
-
-    /**
-     * Extracts the most visually distinctive color from an 8×8 face image
-     * using quantized mode-counting. This surfaces characteristic colors
-     * (hair, clothing, accessories) rather than averaging to beige.
-     *
-     * <p>Algorithm:
-     * <ol>
-     *   <li>Quantize each pixel to 4-bit per channel (16 levels per channel)</li>
-     *   <li>Skip transparent, near-black, near-white, and skin-tone pixels</li>
-     *   <li>Count occurrences of each quantized color</li>
-     *   <li>Return the most frequent color (the mode)</li>
-     *   <li>Boost saturation for vibrancy</li>
-     * </ol>
-     */
-    private String extractDominantColor(BufferedImage face) {
-        // Map of quantized color key → {count, rSum, gSum, bSum}
-        Map<Integer, int[]> buckets = new HashMap<>();
-
-        for (int y = 0; y < face.getHeight(); y++) {
-            for (int x = 0; x < face.getWidth(); x++) {
-                int argb = face.getRGB(x, y);
-                int a = (argb >> 24) & 0xFF;
-                int r = (argb >> 16) & 0xFF;
-                int g = (argb >> 8) & 0xFF;
-                int b = argb & 0xFF;
-
-                // Skip transparent pixels
-                if (a < 128) continue;
-                // Skip near-black (shadow)
-                if (r < 30 && g < 30 && b < 30) continue;
-                // Skip near-white (highlight)
-                if (r > 225 && g > 225 && b > 225) continue;
-
-                // Skip skin tones: detect by checking if the pixel is in the
-                // typical skin hue range (warm beige/tan) with low saturation.
-                // This ensures we pick clothing/hair/accessory colors instead.
-                float[] hsb = Color.RGBtoHSB(r, g, b, null);
-                float hue = hsb[0] * 360f;
-                boolean isSkinTone = (hue >= 15 && hue <= 45) && hsb[1] < 0.55f && hsb[2] > 0.4f;
-                if (isSkinTone) continue;
-
-                // Quantize to 4-bit per channel (16 levels)
-                int rq = (r >> 4) & 0xF;
-                int gq = (g >> 4) & 0xF;
-                int bq = (b >> 4) & 0xF;
-                int key = (rq << 8) | (gq << 4) | bq;
-
-                int[] bucket = buckets.computeIfAbsent(key, k -> new int[4]);
-                bucket[0]++; // count
-                bucket[1] += r; // rSum
-                bucket[2] += g; // gSum
-                bucket[3] += b; // bSum
-            }
-        }
-
-        if (buckets.isEmpty()) {
-            // All pixels were skin-tone or filtered — fall back to averaging all valid pixels
-            return extractFallbackAverage(face);
-        }
-
-        // Find the best bucket based on a combination of frequency (count), brightness, and saturation
-        int[] bestBucket = null;
-        float bestScore = -1f;
+        // Crop face (8,8, 8x8)
+        BufferedImage face = skin.getSubimage(8, 8, 8, 8);
         
-        for (int[] bucket : buckets.values()) {
-            int rAvg = bucket[1] / bucket[0];
-            int gAvg = bucket[2] / bucket[0];
-            int bAvg = bucket[3] / bucket[0];
-            
-            float[] hsb = Color.RGBtoHSB(rAvg, gAvg, bAvg, null);
-            // Score formula: count * (brightness bonus) * (saturation bonus)
-            // Bright, saturated colors get up to a 2.25x multiplier over dark/dull colors
-            float score = bucket[0] * (0.5f + hsb[2]) * (0.5f + hsb[1]);
-            
-            if (score > bestScore) {
-                bestScore = score;
-                bestBucket = bucket;
-            }
-        }
-
-        // Average the actual RGB values in the winning bucket for accuracy
-        int rAvg = bestBucket[1] / bestBucket[0];
-        int gAvg = bestBucket[2] / bestBucket[0];
-        int bAvg = bestBucket[3] / bestBucket[0];
-
-        // Boost saturation for vibrant accent colors
-        float[] hsb = Color.RGBtoHSB(rAvg, gAvg, bAvg, null);
-        hsb[1] = Math.min(1.0f, hsb[1] * 1.4f); // 40% saturation boost
-        hsb[2] = Math.min(1.0f, Math.max(0.35f, hsb[2])); // clamp brightness
-        int boosted = Color.HSBtoRGB(hsb[0], hsb[1], hsb[2]);
-
-        return String.format("#%06x", boosted & 0xFFFFFF);
-    }
-
-    /**
-     * Fallback when all non-skin pixels are filtered: average all visible pixels.
-     * This handles skins that are entirely skin-colored (e.g. naked Steve).
-     */
-    private String extractFallbackAverage(BufferedImage face) {
-        long rTotal = 0, gTotal = 0, bTotal = 0;
-        int count = 0;
-
-        for (int y = 0; y < face.getHeight(); y++) {
-            for (int x = 0; x < face.getWidth(); x++) {
-                int argb = face.getRGB(x, y);
-                int a = (argb >> 24) & 0xFF;
-                if (a < 128) continue;
-                int r = (argb >> 16) & 0xFF;
-                int g = (argb >> 8) & 0xFF;
-                int b = argb & 0xFF;
-                if (r < 30 && g < 30 && b < 30) continue;
-                if (r > 225 && g > 225 && b > 225) continue;
-                rTotal += r;
-                gTotal += g;
-                bTotal += b;
-                count++;
-            }
-        }
-
-        if (count == 0) return "#888888";
-
-        int rAvg = (int) (rTotal / count);
-        int gAvg = (int) (gTotal / count);
-        int bAvg = (int) (bTotal / count);
-
-        float[] hsb = Color.RGBtoHSB(rAvg, gAvg, bAvg, null);
-        hsb[1] = Math.min(1.0f, hsb[1] * 1.3f);
-        hsb[2] = Math.min(1.0f, Math.max(0.35f, hsb[2]));
-        int boosted = Color.HSBtoRGB(hsb[0], hsb[1], hsb[2]);
-        return String.format("#%06x", boosted & 0xFFFFFF);
-    }
-
-    /** Marks a player fetch as failed with a short TTL (10 min) so it retries sooner. */
-    private void markFetchFailed(String playerName) {
-        PlayerMeta meta = metaMap.computeIfAbsent(playerName, k -> new PlayerMeta());
-        meta.fetchFailed = true;
-        meta.lastFetchedEpoch = System.currentTimeMillis();
-        // Don't write a default head to disk for rate-limit failures —
-        // the FaceHandler will serve the in-memory default bytes directly.
-    }
-
-    private void writeDefaultHead(String playerName) {
+        // Try to overlay outer layer (40,8, 8x8) if it exists
+        // Classic skins are 64x32, modern are 64x64. Both have the hat layer at 40,8.
         try {
-            if (defaultHeadBytes == null) {
-                FabricDashboardMod.LOGGER.warn("No default head bytes available for " + playerName);
-                return;
+            BufferedImage hat = skin.getSubimage(40, 8, 8, 8);
+            // Check if hat layer is not just transparent
+            boolean hasHat = false;
+            outer: for (int x=0; x<8; x++) {
+                for (int y=0; y<8; y++) {
+                    if ((hat.getRGB(x, y) >> 24) != 0x00) {
+                        hasHat = true;
+                        break outer;
+                    }
+                }
             }
-            File outFile = new File(facesDir, sanitizeFilename(playerName) + ".png");
-            try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                fos.write(defaultHeadBytes);
+            if (hasHat) {
+                BufferedImage combined = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+                java.awt.Graphics2D g = combined.createGraphics();
+                g.drawImage(face, 0, 0, null);
+                g.drawImage(hat, 0, 0, null);
+                g.dispose();
+                face = combined;
             }
+        } catch (Exception ignored) {}
 
-            // Set a default meta entry — successful (not a rate limit), full TTL
-            PlayerMeta meta = metaMap.computeIfAbsent(playerName, k -> new PlayerMeta());
-            meta.colorHex = "#888888";
-            meta.lastFetchedEpoch = System.currentTimeMillis();
-            meta.fetchFailed = false;
-            saveMeta();
-        } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed to write default head for " + playerName, e);
+        File faceFile = new File(facesDir, sanitizeFilename(playerName) + ".png");
+        ImageIO.write(face, "png", faceFile);
+    }
+
+    private void writeDefaultHead(String playerName) throws IOException {
+        File faceFile = new File(facesDir, sanitizeFilename(playerName) + ".png");
+        try (FileOutputStream fos = new FileOutputStream(faceFile)) {
+            fos.write(defaultHeadBytes);
+        }
+        // Also write default for skin (optional, but prevents repeat 404 logs)
+        File skinFile = new File(facesDir, sanitizeFilename(playerName) + "_skin.png");
+        try (FileOutputStream fos = new FileOutputStream(skinFile)) {
+            fos.write(defaultHeadBytes);
         }
     }
 
-    // ── Meta persistence ────────────────────────────────────────
+    private String sanitizeFilename(String name) {
+        return name.replaceAll("[^a-zA-Z0-9_\\-/]", "_");
+    }
 
     private void loadMeta() {
         if (!metaFile.exists()) return;
-        try (Reader reader = new FileReader(metaFile)) {
-            ConcurrentHashMap<String, PlayerMeta> loaded = GSON.fromJson(reader, META_MAP_TYPE);
-            if (loaded != null) {
-                metaMap.putAll(loaded);
+        try (java.io.FileReader reader = new java.io.FileReader(metaFile)) {
+            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
+            for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
+                JsonObject obj = entry.getValue().getAsJsonObject();
+                PlayerMeta meta = new PlayerMeta();
+                meta.lastSkinUrl = obj.has("lastSkinUrl") ? obj.get("lastSkinUrl").getAsString() : null;
+                meta.lastFetchedEpoch = obj.has("lastFetchedEpoch") ? obj.get("lastFetchedEpoch").getAsLong() : 0L;
+                meta.fetchFailed = obj.has("fetchFailed") && obj.get("fetchFailed").getAsBoolean();
+                metaMap.put(entry.getKey(), meta);
             }
         } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed to load player head meta", e);
+            FabricDashboardMod.LOGGER.error("Failed to load head meta: " + e.getMessage());
         }
     }
 
-    private synchronized void saveMeta() {
-        try (Writer writer = new FileWriter(metaFile)) {
-            GSON.toJson(metaMap, writer);
-        } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("Failed to save player head meta", e);
+    private void saveMeta() {
+        try (java.io.FileWriter writer = new java.io.FileWriter(metaFile)) {
+            JsonObject json = new JsonObject();
+            for (Map.Entry<String, PlayerMeta> entry : metaMap.entrySet()) {
+                JsonObject obj = new JsonObject();
+                obj.addProperty("lastSkinUrl", entry.getValue().lastSkinUrl);
+                obj.addProperty("lastFetchedEpoch", entry.getValue().lastFetchedEpoch);
+                obj.addProperty("fetchFailed", entry.getValue().fetchFailed);
+                json.add(entry.getKey(), obj);
+            }
+            new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(json, writer);
+        } catch (IOException e) {
+            FabricDashboardMod.LOGGER.error("Failed to save head meta: " + e.getMessage());
         }
-    }
-
-    private String sanitizeFilename(String playerName) {
-        if (playerName == null) return "unknown";
-        return playerName.replaceAll("[^a-zA-Z0-9_\\-]", "_");
     }
 }
