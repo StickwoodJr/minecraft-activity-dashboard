@@ -15,6 +15,7 @@ import net.minecraft.text.Text;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class DashboardCommand {
@@ -351,6 +352,63 @@ public class DashboardCommand {
 
                         return 1;
                     })
+                )
+                .then(CommandManager.literal("uuid")
+                    .then(CommandManager.argument("identifier", StringArgumentType.string())
+                        .executes(context -> {
+                            String input = StringArgumentType.getString(context, "identifier");
+                            com.playtime.dashboard.util.UuidCache cache = com.playtime.dashboard.util.UuidCache.getInstance();
+                            
+                            UUID resolvedUuid = null;
+                            String resolvedName = null;
+                            Long lastAttempt = null;
+                            String source = "§cnone";
+                            
+                            try {
+                                resolvedUuid = UUID.fromString(input);
+                                if (cache.isRuntime(resolvedUuid)) source = "§aLocal (Runtime)";
+                                else if (cache.isDisk(resolvedUuid)) source = "§aLocal (Disk)";
+                                else if (cache.isNetworkResolved(resolvedUuid)) source = "§bNetwork (Cached)";
+                                
+                                resolvedName = cache.getUsername(resolvedUuid).orElse(null);
+                                lastAttempt = cache.getNetworkLastAttempt(resolvedUuid);
+                            } catch (IllegalArgumentException e) {
+                                if (cache.isRuntime(input)) source = "§aLocal (Runtime)";
+                                else if (cache.isDisk(input)) source = "§aLocal (Disk)";
+                                
+                                resolvedUuid = cache.getUuid(input).orElse(null);
+                                resolvedName = input;
+                                lastAttempt = cache.getNetworkLastAttempt(input);
+                            }
+                            
+                            long now = System.currentTimeMillis();
+                            int cooldownSec = DashboardConfig.get().uuid_refresh_cooldown_seconds;
+                            boolean throttled = lastAttempt != null && (now - lastAttempt) < cooldownSec * 1000L;
+                            
+                            if (source.equals("§cnone") && throttled) {
+                                source = "§cNone (Throttled)";
+                            }
+                            
+                            context.getSource().sendMessage(Text.literal("§6--- Dashboard Debug: UUID ---"));
+                            context.getSource().sendMessage(Text.literal("§eIdentifier: §f" + input));
+                            context.getSource().sendMessage(Text.literal("§eSource: " + source));
+                            context.getSource().sendMessage(Text.literal("§eResolved UUID: §f" + (resolvedUuid != null ? resolvedUuid.toString() : "§cnone")));
+                            context.getSource().sendMessage(Text.literal("§eResolved Name: §f" + (resolvedName != null ? resolvedName : "§cnone")));
+                            
+                            if (lastAttempt != null) {
+                                long elapsed = (now - lastAttempt) / 1000;
+                                String status = throttled ? "§cTHROTTLED" : "§aCLEARED";
+                                context.getSource().sendMessage(Text.literal("§eLast network attempt: §f" + elapsed + "s ago (" + status + ")"));
+                                if (throttled) {
+                                    context.getSource().sendMessage(Text.literal("§eCooldown remains: §f" + (cooldownSec - elapsed) + "s"));
+                                }
+                            } else {
+                                context.getSource().sendMessage(Text.literal("§eLast network attempt: §fnever"));
+                            }
+                            
+                            return 1;
+                        })
+                    )
                 )
             )
             .then(CommandManager.literal("reload")
