@@ -1,8 +1,5 @@
 package com.playtime.dashboard.web;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
 import com.playtime.dashboard.FabricDashboardMod;
 import com.playtime.dashboard.config.DashboardConfig;
 import com.playtime.dashboard.parser.LogParser;
@@ -11,164 +8,428 @@ import com.playtime.dashboard.util.UuidCache;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import net.fabricmc.loader.api.FabricLoader;
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
 
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.Reader;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
+
+import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.GZIPOutputStream;
 
-import com.google.gson.JsonParser;
-import com.google.gson.JsonElement;
-
+/**
+ * Embedded JDK HTTP server that powers the Minecraft Activity Dashboard.
+ * Exposes four endpoints: {@code /} for the HTML frontend, {@code /api/activity} for cached
+ * JSON session data, {@code /api/player-meta} for skin-derived player colors, and
+ * {@code /faces/<player>.png} for cached player head images.
+ * A background scheduler handles the initial historical log parse on first run and
+ * then re-runs an incremental parse on a configurable interval.
+ */
 public class DashboardWebServer {
-    private static DashboardWebServer instance;
+    private static volatile DashboardWebServer instance;
+
+    private final MinecraftServer minecraftServer;
     private HttpServer httpServer;
-    private final MinecraftServer server;
+    private final LogParser parser;
     private final File cacheFile;
-    private final LogParser logParser;
-    private final StatsAggregator statsAggregator;
     private final PlayerHeadService headService;
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "Dashboard-Worker");
+    private final File leaderboardCacheFile;
+    private final StatsAggregator statsAggregator;
+    private final UuidCache uuidCache;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
+    private final ExecutorService worldSizeExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "dashboard-world-size");
         t.setDaemon(true);
         return t;
     });
+    private volatile LiveMetricsSnapshot liveSnapshot;
+    private volatile long cachedWorldSizeMb = 0;
+    private volatile long lastWorldSizeCheck = 0;
+    private volatile long lastWorldDirModified = -1;
 
-    private final AtomicBoolean worldSizeWalking = new AtomicBoolean(false);
-    private double cachedWorldSizeGb = 0.0;
-    private long lastWorldSizeWalkTs = 0L;
+    public static class LivePlayerEntry {
+        public final String name;
+        public final double x;
+        public final double y;
+        public final double z;
+        public final String dimension;
 
-    private DashboardWebServer(MinecraftServer server) {
-        this.server = server;
-        File gameDir = FabricLoader.getInstance().getGameDir().toFile();
-        this.cacheFile = new File(gameDir, "dashboard_cache.json");
-        this.logParser = new LogParser(gameDir, cacheFile);
-        this.statsAggregator = new StatsAggregator();
-        this.headService = new PlayerHeadService(gameDir);
+        public LivePlayerEntry(String name, double x, double y, double z, String dimension) {
+            this.name = name;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.dimension = dimension;
+        }
     }
 
-    public static void start(MinecraftServer server) {
-        if (instance != null) return;
-        instance = new DashboardWebServer(server);
-        try {
-            instance.init();
-        } catch (IOException e) {
-            FabricDashboardMod.LOGGER.error("Failed to start Dashboard Web Server: " + e.getMessage());
+    public static class LiveMetricsSnapshot {
+        public final int playersOnline;
+        public final int maxPlayers;
+        public final List<String> playerNames;
+        public final List<LivePlayerEntry> players;
+        public final double tps;
+        public final double mspt;
+        public final double cpuProcess;
+        public final long jvmUsedMb;
+        public final long jvmMaxMb;
+        public final double diskUsedGb;
+        public final double diskTotalGb;
+        public final double diskFreeGb;
+        public final long worldSizeMb;
+        public final String status;
+        public final long timestamp;
+
+        public LiveMetricsSnapshot(int playersOnline, int maxPlayers, List<String> playerNames,
+                                   List<LivePlayerEntry> players,
+                                   double tps, double mspt, double cpuProcess,
+                                   long jvmUsedMb, long jvmMaxMb, double diskUsedGb,
+                                   double diskTotalGb, double diskFreeGb, long worldSizeMb, String status) {
+            this.playersOnline = playersOnline;
+            this.maxPlayers = maxPlayers;
+            this.playerNames = Collections.unmodifiableList(playerNames);
+            this.players = Collections.unmodifiableList(players);
+            this.tps = tps;
+            this.mspt = mspt;
+            this.cpuProcess = cpuProcess;
+            this.jvmUsedMb = jvmUsedMb;
+            this.jvmMaxMb = jvmMaxMb;
+            this.diskUsedGb = diskUsedGb;
+            this.diskTotalGb = diskTotalGb;
+            this.diskFreeGb = diskFreeGb;
+            this.worldSizeMb = worldSizeMb;
+            this.status = status;
+            this.timestamp = System.currentTimeMillis();
         }
+
+        // Warming up constructor
+        public LiveMetricsSnapshot() {
+            this(0, 0, new ArrayList<>(), new ArrayList<>(), 0, 0, 0, 0, 0, 0, 0, 0, 0, "warming_up");
+        }
+    }
+
+    public DashboardWebServer(MinecraftServer server) {
+        this.minecraftServer = server;
+        this.parser = new LogParser();
+        this.cacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_cache.json");
+        this.headService = new PlayerHeadService(FabricLoader.getInstance().getGameDir().toFile());
+        this.leaderboardCacheFile = new File(FabricLoader.getInstance().getGameDir().toFile(), "dashboard_leaderboards.json");
+        this.statsAggregator = new StatsAggregator();
+        this.uuidCache = UuidCache.getInstance();
+        instance = this;
     }
 
     public static DashboardWebServer getInstance() {
         return instance;
     }
 
-    private void init() throws IOException {
-        DashboardConfig config = DashboardConfig.get();
-        httpServer = HttpServer.create(new InetSocketAddress(config.web_port), 0);
-        
-        httpServer.createContext("/", new StaticHandler());
-        httpServer.createContext("/api/activity", new ApiHandler(this));
-        httpServer.createContext("/api/stats", new StatsHandler(this));
-        httpServer.createContext("/api/player/stats", new PlayerStatsHandler(this));
-        httpServer.createContext("/api/player/advancements", new PlayerAdvancementsHandler(this));
-        httpServer.createContext("/api/player/head", new PlayerHeadHandler(this));
-        httpServer.createContext("/api/player/skin", new PlayerSkinHandler(this));
-        httpServer.createContext("/api/performance", new PerformanceHandler(this));
-        httpServer.createContext("/api/config", new ConfigHandler());
-
-        httpServer.setExecutor(Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "Dashboard-HTTP");
-            t.setDaemon(true);
-            return t;
-        }));
-        
-        httpServer.start();
-        FabricDashboardMod.LOGGER.info("Dashboard Web Server started on port " + config.web_port);
-
-        // Schedule periodic log parsing
-        scheduler.scheduleWithFixedDelay(() -> {
-            try {
-                logParser.parseIncremental();
-                triggerHeadFetches();
-            } catch (Exception e) {
-                FabricDashboardMod.LOGGER.error("Periodic log parse failed: " + e.getMessage());
-            }
-        }, 1, config.incremental_update_interval_minutes, TimeUnit.MINUTES);
-
-        // Schedule periodic world size calculation
-        scheduler.scheduleAtFixedRate(this::refreshWorldSize, 0, config.world_size_refresh_minutes, TimeUnit.MINUTES);
-    }
-
-    public void triggerReparse() {
-        logParser.parseAll();
-        triggerHeadFetches();
-    }
-
     public PlayerHeadService getHeadService() {
         return headService;
     }
 
-    private void refreshWorldSize() {
-        if (worldSizeWalking.getAndSet(true)) return;
+    /** Returns the last computed world size in MB (0 until the first walk completes). */
+    public long getCachedWorldSizeMb() {
+        return cachedWorldSizeMb;
+    }
+
+    /** Returns the epoch-ms timestamp of the last time a world-size walk was submitted (0 = never). */
+    public long getLastWorldSizeCheck() {
+        return lastWorldSizeCheck;
+    }
+
+    /** Returns true if the world-size executor has been shut down. */
+    public boolean isWorldSizeExecutorShutdown() {
+        return worldSizeExecutor.isShutdown();
+    }
+
+    /** Returns true if the world-size executor has terminated (all tasks finished after shutdown). */
+    public boolean isWorldSizeExecutorTerminated() {
+        return worldSizeExecutor.isTerminated();
+    }
+
+    /**
+     * Submits a no-op task to the world-size executor that logs its thread name and daemon status.
+     * Intended for use by {@code /dashboard debug worldsize} only.
+     *
+     * @throws java.util.concurrent.RejectedExecutionException if the executor has shut down in the
+     *         narrow race window between the caller's {@link #isWorldSizeExecutorShutdown()} check
+     *         and this call. Callers should catch this exception.
+     */
+    public void submitWorldSizeThreadIdentityCheck() {
+        worldSizeExecutor.execute(() ->
+            FabricDashboardMod.LOGGER.info(
+                "[Dashboard/debug] worldSizeExecutor thread: {}, daemon: {}",
+                Thread.currentThread().getName(),
+                Thread.currentThread().isDaemon()));
+    }
+
+    public void start() {
         try {
-            FabricDashboardMod.LOGGER.info("Starting background world size calculation...");
-            long start = System.currentTimeMillis();
-            Path worldPath = server.getRunDirectory().toPath();
+            int port = DashboardConfig.get().web_port;
+            httpServer = HttpServer.create(new InetSocketAddress(port), 0);
             
-            // Container optimization: if we are in /home/container, walk that instead.
-            if (worldPath.toAbsolutePath().toString().startsWith("/home/container")) {
-                worldPath = Path.of("/home/container");
+            httpServer.createContext("/", new HtmlHandler());
+            httpServer.createContext("/api/activity", new ApiHandler(cacheFile));
+            httpServer.createContext("/api/player-meta", new PlayerMetaHandler(headService));
+            httpServer.createContext("/faces/", new FaceHandler(headService));
+            httpServer.createContext("/skins/", new SkinHandler(headService));
+            httpServer.createContext("/api/leaderboards", new LeaderboardHandler(leaderboardCacheFile));
+            httpServer.createContext("/api/player-stats/", new PlayerStatsHandler(statsAggregator, uuidCache));
+            httpServer.createContext("/api/player-advancements/", new PlayerAdvancementsHandler(statsAggregator, uuidCache));
+            httpServer.createContext("/api/live", new LiveMetricsHandler(this));
+            httpServer.createContext("/api/events", new EventsHandler());
+            httpServer.createContext("/api/dynmap-config", new DynmapConfigHandler());
+            httpServer.createContext("/respack.zip", new RespackHandler());
+            
+            httpServer.setExecutor(Executors.newFixedThreadPool(2));
+            httpServer.start();
+            FabricDashboardMod.LOGGER.info("Dashboard Web Server started on port " + port);
+
+            // Setup scheduling
+            
+            // Rebuild the activity cache on startup, then schedule incremental updates.
+            scheduler.execute(() -> {
+                File logsDir = resolveLogsDir();
+                FabricDashboardMod.LOGGER.info("[Dashboard] Startup reparse beginning. Logs directory: " + logsDir.getAbsolutePath() + ", cache file: " + cacheFile.getAbsolutePath());
+                parser.runHistoricalParse(logsDir, cacheFile);
+                FabricDashboardMod.LOGGER.info("[Dashboard] Startup reparse complete. Cache days: " + countCachedDays() + ", cache file: " + cacheFile.getAbsolutePath());
+
+                // Trigger head fetches once after the startup parse — not on every incremental update.
+                // New players discovered later will have their heads fetched on-demand by the FaceHandler.
+                triggerHeadFetches();
+
+                long lbDelay = DashboardConfig.get().leaderboard_update_interval_minutes;
+                scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        java.nio.file.Path statsDir = FabricLoader.getInstance().getGameDir()
+                            .resolve(DashboardConfig.get().stats_world_name)
+                            .resolve("stats");
+
+                        // Optimization: Skip rebuild if no stats files have changed
+                        long lastRebuild = leaderboardCacheFile.exists() ? leaderboardCacheFile.lastModified() : 0;
+                        File[] statsFiles = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
+                        // If no cache exists, or stats directory is missing/unreadable, trigger a build attempt.
+                        boolean needsRebuild = (lastRebuild == 0 || statsFiles == null);
+                        
+                        if (!needsRebuild) {
+                            for (File f : statsFiles) {
+                                // Use >= to account for filesystem timestamp resolution (often 1s on ext4).
+                                // This may cause occasional redundant rebuilds but prevents missed updates.
+                                if (f.lastModified() >= lastRebuild) {
+                                    needsRebuild = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!needsRebuild) {
+                            return;
+                        }
+
+                        uuidCache.refresh(); // Re-read usercache.json
+                        Map<String, Map<String, Map<String, Integer>>> leaderboards = statsAggregator.buildLeaderboards(statsDir, uuidCache);
+                        
+                        File tempFile = new File(leaderboardCacheFile.getParentFile(), leaderboardCacheFile.getName() + ".tmp");
+                        try (java.io.FileWriter writer = new java.io.FileWriter(tempFile)) {
+                            new com.google.gson.Gson().toJson(leaderboards, writer);
+                        }
+                        java.nio.file.Files.move(tempFile.toPath(), leaderboardCacheFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                    } catch (Exception e) {
+                        FabricDashboardMod.LOGGER.error("Leaderboard aggregation failed", e);
+                    }
+                }, 0, lbDelay, TimeUnit.MINUTES);
+
+                long delay = DashboardConfig.get().incremental_update_interval_minutes;
+                scheduler.scheduleAtFixedRate(() -> {
+                    File incLogsDir;
+                    String cLogsDir = DashboardConfig.get().logs_directory;
+                    if (cLogsDir != null && !cLogsDir.trim().isEmpty()) {
+                        incLogsDir = new File(cLogsDir);
+                    } else {
+                        incLogsDir = new File(FabricLoader.getInstance().getGameDir().toFile(), "logs");
+                    }
+                    parser.runIncrementalParse(incLogsDir, cacheFile);
+                }, delay, delay, TimeUnit.MINUTES);
+
+                // Live metrics sampling
+                if (DashboardConfig.get().enable_live_tab) {
+                    liveSnapshot = new LiveMetricsSnapshot();
+                    long liveInterval = DashboardConfig.get().live_update_interval_seconds;
+                    scheduler.scheduleAtFixedRate(this::updateLiveMetrics, 0, liveInterval, TimeUnit.SECONDS);
+                }
+            });
+
+        } catch (IOException e) {
+            FabricDashboardMod.LOGGER.error("Failed to start Dashboard Web Server", e);
+        }
+    }
+
+    public void reparseLogs() {
+        scheduler.execute(() -> {
+            File logsDir = resolveLogsDir();
+            FabricDashboardMod.LOGGER.info("[Dashboard] Manual reparse requested. Logs directory: " + logsDir.getAbsolutePath() + ", cache file: " + cacheFile.getAbsolutePath());
+            try {
+                parser.runHistoricalParse(logsDir, cacheFile);
+                FabricDashboardMod.LOGGER.info("[Dashboard] Manual reparse complete. Cache days: " + countCachedDays() + ", cache file: " + cacheFile.getAbsolutePath());
+                triggerHeadFetches();
+
+                // Invalidate the leaderboard cache so the scheduler rebuilds it clean
+                // on its next tick (respecting the configured interval). This prevents
+                // stale player-name keys (e.g. from removed hardcode aliases) from
+                // persisting after an alias config change or a reparse.
+                if (leaderboardCacheFile.exists() && leaderboardCacheFile.delete()) {
+                    FabricDashboardMod.LOGGER.info("[Dashboard] Leaderboard cache invalidated after reparse; will rebuild on next scheduler tick.");
+                }
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.error("[Dashboard] Manual reparse failed", e);
+            }
+        });
+    }
+
+    private File resolveLogsDir() {
+        String customLogsDir = DashboardConfig.get().logs_directory;
+        if (customLogsDir != null && !customLogsDir.trim().isEmpty()) {
+            return new File(customLogsDir);
+        }
+        return new File(FabricLoader.getInstance().getGameDir().toFile(), "logs");
+    }
+
+    private int countCachedDays() {
+        if (!cacheFile.exists()) return 0;
+        try (Reader reader = new FileReader(cacheFile)) {
+            JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
+            if (data.has("daily") && data.get("daily").isJsonObject()) {
+                return data.getAsJsonObject("daily").size();
+            }
+        } catch (Exception e) {
+            FabricDashboardMod.LOGGER.warn("[Dashboard] Failed to count cached days after reparse", e);
+        }
+        return 0;
+    }
+
+    private void updateLiveMetrics() {
+        try {
+            // Player data
+            int playersOnline = minecraftServer.getPlayerManager().getCurrentPlayerCount();
+            int maxPlayers = minecraftServer.getPlayerManager().getMaxPlayerCount();
+            List<String> playerNames = new ArrayList<>();
+            List<LivePlayerEntry> players = new ArrayList<>();
+            minecraftServer.getPlayerManager().getPlayerList().forEach(player -> {
+                if (playerNames.size() < 100) {
+                    String name = player.getGameProfile().getName();
+                    playerNames.add(name);
+                    String dim = player.getWorld().getRegistryKey().getValue().toString();
+                    players.add(new LivePlayerEntry(name, player.getX(), player.getY(), player.getZ(), dim));
+                }
+            });
+
+            // TPS / MSPT
+            double tps = 0;
+            double mspt = 0;
+            long[] tickTimes = minecraftServer.getTickTimes(); // Internal reference, used transiently
+            if (tickTimes != null && tickTimes.length > 0) {
+                long sum = 0;
+                for (long time : tickTimes) sum += time;
+                mspt = (sum / (double) tickTimes.length) * 1.0E-6D;
+                tps = Math.min(20.0D, 1000.0D / mspt);
             }
 
-            cachedWorldSizeGb = calculateFolderSizeGb(worldPath);
-            lastWorldSizeWalkTs = System.currentTimeMillis();
-            FabricDashboardMod.LOGGER.info("World size calculation complete: " + String.format("%.2f GB", cachedWorldSizeGb) + " (took " + (lastWorldSizeWalkTs - start) + "ms)");
+            // CPU / Memory
+            double cpuProcess = 0;
+            OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean) {
+                com.sun.management.OperatingSystemMXBean sunBean = (com.sun.management.OperatingSystemMXBean) osBean;
+                cpuProcess = sunBean.getProcessCpuLoad() * 100.0;
+            }
+            
+            Runtime runtime = Runtime.getRuntime();
+            long jvmMaxMb = runtime.maxMemory() / (1024 * 1024);
+            long jvmUsedMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024);
+
+            // Disk Usage
+            File targetDir = new File("/home/container");
+            if (!targetDir.exists()) {
+                targetDir = FabricLoader.getInstance().getGameDir().toFile();
+            }
+            
+            double diskTotalGb = targetDir.getTotalSpace() / (1024.0 * 1024.0 * 1024.0);
+            double diskFreeGb = targetDir.getUsableSpace() / (1024.0 * 1024.0 * 1024.0);
+            double diskUsedGb = diskTotalGb - diskFreeGb;
+
+            // World Size: offload to background executor with change detection
+            long refreshMs = DashboardConfig.get().world_size_refresh_minutes * 60_000L;
+            if (System.currentTimeMillis() - lastWorldSizeCheck > refreshMs) {
+                lastWorldSizeCheck = System.currentTimeMillis(); // set before submit to prevent double-submit
+                worldSizeExecutor.execute(() -> {
+                    try {
+                        File worldDir = new File(FabricLoader.getInstance().getGameDir().toFile(),
+                                DashboardConfig.get().stats_world_name);
+                        if (!worldDir.exists()) return;
+                        
+                        long currentModified = worldDir.lastModified();
+                        if (currentModified == lastWorldDirModified && cachedWorldSizeMb > 0) return;
+
+                        long newMb = calculateDirectorySize(worldDir,
+                                DashboardConfig.get().world_size_max_depth) / (1024 * 1024);
+                        cachedWorldSizeMb = newMb;
+                        lastWorldDirModified = currentModified;
+                    } catch (Exception e) {
+                        FabricDashboardMod.LOGGER.warn("World size background update failed", e);
+                    }
+                });
+            }
+
+            this.liveSnapshot = new LiveMetricsSnapshot(playersOnline, maxPlayers, playerNames,
+                                                        players,
+                                                        tps, mspt, cpuProcess,
+                                                        jvmUsedMb, jvmMaxMb, diskUsedGb,
+                                                        diskTotalGb, diskFreeGb, cachedWorldSizeMb, "ok");
         } catch (Exception e) {
-            FabricDashboardMod.LOGGER.error("World size calculation failed: " + e.getMessage());
-        } finally {
-            worldSizeWalking.set(false);
+            FabricDashboardMod.LOGGER.error("Failed to update live metrics", e);
         }
     }
 
-    private double calculateFolderSizeGb(Path path) throws IOException {
-        long[] total = {0};
+
+    private long calculateDirectorySize(File directory, int maxDepth) {
+        if (directory == null || !directory.exists() || !directory.isDirectory()) return 0;
+        final long[] total = {0L};
         try {
-            java.nio.file.Files.walk(path, DashboardConfig.get().world_size_max_depth)
-                .filter(p -> java.nio.file.Files.isRegularFile(p))
-                .forEach(p -> {
-                    try {
-                        total[0] += java.nio.file.Files.size(p);
-                    } catch (IOException ignored) {}
-                });
-        } catch (Exception e) {
+            java.nio.file.Files.walkFileTree(
+                directory.toPath(),
+                java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class),
+                maxDepth,
+                new java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                    @Override
+                    public java.nio.file.FileVisitResult visitFile(java.nio.file.Path file,
+                            java.nio.file.attribute.BasicFileAttributes attrs) {
+                        if (attrs.isRegularFile()) total[0] += attrs.size();
+                        return java.nio.file.FileVisitResult.CONTINUE;
+                    }
+                    @Override
+                    public java.nio.file.FileVisitResult visitFileFailed(java.nio.file.Path file, IOException exc) {
+                        return java.nio.file.FileVisitResult.CONTINUE;
+                    }
+                }
+            );
+        } catch (IOException e) {
             FabricDashboardMod.LOGGER.warn("World size walk failed: " + e.getMessage());
         }
-        return total[0] / (1024.0 * 1024.0 * 1024.0);
-    }
-
-    public double getCachedWorldSize() { return cachedWorldSizeGb; }
-    public String getLastWorldSizeWalk() { return lastWorldSizeWalkTs == 0 ? "Never" : new java.util.Date(lastWorldSizeWalkTs).toString(); }
-    public String getNextWorldSizeWalk() { 
-        if (lastWorldSizeWalkTs == 0) return "Pending";
-        return new java.util.Date(lastWorldSizeWalkTs + (DashboardConfig.get().world_size_refresh_minutes * 60000L)).toString(); 
-    }
-    public boolean isWorldSizeThreadActive() { return worldSizeWalking.get(); }
-    public void logWorldSizeThreadId() {
-        // This is a debug tool to verify thread isolation.
-        FabricDashboardMod.LOGGER.info("[Dashboard-Debug] WorldSize background thread ID: " + Thread.currentThread().getId() + " (" + Thread.currentThread().getName() + ")");
+        return total[0];
     }
 
     /** Scans the cache file for all known player names and kicks off head fetches. */
@@ -208,8 +469,713 @@ public class DashboardWebServer {
         if (scheduler != null) {
             scheduler.shutdownNow();
         }
+        if (worldSizeExecutor != null) {
+            worldSizeExecutor.shutdownNow();
+            try {
+                worldSizeExecutor.awaitTermination(2, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (headService != null) {
+            headService.shutdown();
+        }
     }
 
-    public MinecraftServer getServer() { return server; }
-    public File getCacheFile() { return cacheFile; }
+    private static class HtmlHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+            
+            String path = exchange.getRequestURI().getPath();
+            
+            if (path.equals("/server-logo.jpg")) {
+                String customPath = DashboardConfig.get().custom_logo_path;
+                InputStream is = null;
+                File customFile = null;
+
+                if (customPath != null && !customPath.trim().isEmpty()) {
+                    customFile = new File(customPath);
+                    if (customFile.exists() && customFile.isFile()) {
+                        try {
+                            is = new FileInputStream(customFile);
+                        } catch (FileNotFoundException ignored) {}
+                    }
+                }
+
+                if (is == null) {
+                    is = getClass().getResourceAsStream("/web/server-logo.jpg");
+                }
+
+                if (is == null) {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+
+                try {
+                    String contentType = "image/jpeg";
+                    if (customFile != null && customFile.getName().toLowerCase().endsWith(".png")) {
+                        contentType = "image/png";
+                    }
+                    exchange.getResponseHeaders().set("Content-Type", contentType);
+                    exchange.sendResponseHeaders(200, 0);
+                    try (OutputStream os = exchange.getResponseBody()) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            os.write(buffer, 0, bytesRead);
+                        }
+                    }
+                } finally {
+                    is.close();
+                }
+                return;
+            }
+            
+            if (path.equals("/favicon.png") || path.equals("/favicon.ico")) {
+                DashboardConfig config = DashboardConfig.get();
+                String favPath = config.favicon_path;
+                String logoPath = config.custom_logo_path;
+                InputStream is = null;
+                File targetFile = null;
+
+                // 1. Try favicon_path
+                if (favPath != null && !favPath.trim().isEmpty()) {
+                    targetFile = new File(favPath);
+                    if (targetFile.exists() && targetFile.isFile()) {
+                        try { is = new FileInputStream(targetFile); } catch (FileNotFoundException ignored) {}
+                    }
+                }
+                // 2. Fallback to custom_logo_path
+                if (is == null && logoPath != null && !logoPath.trim().isEmpty()) {
+                    targetFile = new File(logoPath);
+                    if (targetFile.exists() && targetFile.isFile()) {
+                        try { is = new FileInputStream(targetFile); } catch (FileNotFoundException ignored) {}
+                    }
+                }
+                // 3. Fallback to default logo in JAR
+                if (is == null) {
+                    is = getClass().getResourceAsStream("/web/server-logo.jpg");
+                }
+
+                if (is == null) {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+
+                try {
+                    String contentType = "image/png"; // Default
+                    String name = (targetFile != null) ? targetFile.getName().toLowerCase() : "server-logo.jpg";
+                    if (name.endsWith(".jpg") || name.endsWith(".jpeg")) contentType = "image/jpeg";
+                    else if (name.endsWith(".ico")) contentType = "image/x-icon";
+                    
+                    exchange.getResponseHeaders().set("Content-Type", contentType);
+                    exchange.sendResponseHeaders(200, 0);
+                    try (OutputStream os = exchange.getResponseBody()) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            os.write(buffer, 0, bytesRead);
+                        }
+                    }
+                } finally {
+                    is.close();
+                }
+                return;
+            }
+
+            if (!path.equals("/") && !path.equals("/mc-activity-heatmap-v13.html")) {
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+
+            try (InputStream is = getClass().getResourceAsStream("/web/mc-activity-heatmap-v13.html")) {
+                if (is == null) {
+                    String error = "HTML file not found in mod resources.";
+                    exchange.sendResponseHeaders(500, error.length());
+                    try (OutputStream os = exchange.getResponseBody()) {
+                        os.write(error.getBytes());
+                    }
+                    return;
+                }
+                
+                // Read HTML and replace placeholders
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line).append("\n");
+                    }
+                }
+                
+                String html = sb.toString();
+                DashboardConfig config = DashboardConfig.get();
+                html = html.replace("{{TAB_TITLE}}", config.tab_title != null ? config.tab_title : "Playtime Dashboard");
+                html = html.replace("{{SERVER_NAME}}", config.server_name != null ? config.server_name : "MC Server");
+                html = html.replace("{{DASHBOARD_TITLE}}", config.dashboard_title != null ? config.dashboard_title : "Player Activity");
+                html = html.replace("{{DASHBOARD_DESCRIPTION}}", config.dashboard_description != null ? config.dashboard_description : "Session data");
+                html = html.replace("{{ENABLE_DYNMAP}}", String.valueOf(config.enable_dynmap));
+                html = html.replace("{{DYNMAP_URL}}", config.dynmap_url != null ? config.dynmap_url : "");
+                html = html.replace("{{ENABLE_LIVE_TAB}}", String.valueOf(config.enable_live_tab));
+                html = html.replace("{{LIVE_UPDATE_INTERVAL_MS}}", String.valueOf(config.live_update_interval_seconds * 1000));
+                html = html.replace("{{LIVE_TAB_DISPLAY}}", config.enable_live_tab ? "block" : "none");
+                
+                FabricDashboardMod.LOGGER.info("Serving dashboard. Dynmap enabled: " + config.enable_dynmap + ", URL: " + config.dynmap_url);
+                
+                byte[] response = html.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+                exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+                exchange.getResponseHeaders().set("Pragma", "no-cache");
+                exchange.getResponseHeaders().set("Expires", "0");
+                exchange.sendResponseHeaders(200, response.length);
+                
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(response);
+                }
+            }
+        }
+    }
+
+    /** Serves cached player face PNGs from disk. */
+    private static class FaceHandler implements HttpHandler {
+        private final PlayerHeadService headService;
+
+        public FaceHandler(PlayerHeadService headService) {
+            this.headService = headService;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            // Extract player name from /faces/<playerName>.png
+            String filename = path.substring("/faces/".length());
+            if (!filename.endsWith(".png")) {
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+            String playerName = filename.substring(0, filename.length() - 4);
+
+            // Special-case: serve default_head directly from pre-loaded bytes
+            // This prevents the fallback-for-the-fallback problem
+            if (playerName.equals("default_head")) {
+                serveDefaultHead(exchange);
+                return;
+            }
+
+            // Sanitize player name — only allow word characters, slash, and hyphen
+            if (!playerName.matches("[\\w/\\-]+") || DashboardConfig.get().isPlayerIgnored(playerName)) {
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
+
+            File faceFile = headService.getFaceFile(playerName);
+
+            exchange.getResponseHeaders().set("Content-Type", "image/png");
+            exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
+
+            // Always trigger a background fetch check (it will return quickly if fresh)
+            headService.fetchIfNeeded(playerName);
+
+            if (faceFile != null && faceFile.exists()) {
+                exchange.sendResponseHeaders(200, faceFile.length());
+                try (InputStream is = new FileInputStream(faceFile);
+                     OutputStream os = exchange.getResponseBody()) {
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        os.write(buffer, 0, bytesRead);
+                    }
+                }
+            } else {
+                // Serve default head from pre-loaded bytes
+                serveDefaultHead(exchange);
+            }
+        }
+
+        private void serveDefaultHead(HttpExchange exchange) throws IOException {
+            byte[] defaultBytes = headService.getDefaultHeadBytes();
+            if (defaultBytes == null) {
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+            exchange.getResponseHeaders().set("Content-Type", "image/png");
+            exchange.getResponseHeaders().set("Cache-Control", "public, max-age=86400");
+            exchange.sendResponseHeaders(200, defaultBytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(defaultBytes);
+            }
+        }
+    }
+
+    /** Serves cached full skin PNGs for the 3D viewer. Same-origin avoids CORS. */
+    private static class SkinHandler implements HttpHandler {
+        private final PlayerHeadService headService;
+
+        public SkinHandler(PlayerHeadService headService) {
+            this.headService = headService;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            String filename = path.substring("/skins/".length());
+            if (!filename.endsWith(".png")) {
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+            String playerName = filename.substring(0, filename.length() - 4);
+
+            if (!playerName.matches("[\\w/\\-]+") || DashboardConfig.get().isPlayerIgnored(playerName)) {
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
+
+            File skinFile = headService.getFullSkinFile(playerName);
+
+            exchange.getResponseHeaders().set("Content-Type", "image/png");
+            exchange.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
+
+            // Always trigger a background fetch check
+            headService.fetchIfNeeded(playerName);
+
+            if (skinFile != null && skinFile.exists()) {
+                exchange.sendResponseHeaders(200, skinFile.length());
+                try (InputStream is = new FileInputStream(skinFile);
+                     OutputStream os = exchange.getResponseBody()) {
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        os.write(buffer, 0, bytesRead);
+                    }
+                }
+            } else {
+                // No cached full skin — return 404; frontend will show default model
+                exchange.sendResponseHeaders(404, -1);
+            }
+        }
+    }
+
+    /** Returns JSON map of player names to their skin-derived hex colors. */
+    private static class PlayerMetaHandler implements HttpHandler {
+        private final PlayerHeadService headService;
+        private static final Gson GSON = new Gson();
+
+        public PlayerMetaHandler(PlayerHeadService headService) {
+            this.headService = headService;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            Map<String, PlayerHeadService.PlayerMeta> metaMap = headService.getColorMap();
+            DashboardConfig cfg = DashboardConfig.get();
+            Map<String, PlayerHeadService.PlayerMeta> filtered = new HashMap<>();
+            for (Map.Entry<String, PlayerHeadService.PlayerMeta> entry : metaMap.entrySet()) {
+                if (!cfg.isPlayerIgnored(entry.getKey())) {
+                    filtered.put(entry.getKey(), entry.getValue());
+                }
+            }
+            byte[] json = GSON.toJson(filtered).getBytes(StandardCharsets.UTF_8);
+
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
+            exchange.sendResponseHeaders(200, json.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(json);
+            }
+        }
+    }
+
+    private static class ApiHandler implements HttpHandler {
+        private final File cacheFile;
+        private static final Gson GSON = new Gson();
+        
+        private volatile byte[] cachedResponse;
+        private volatile String cachedEtag;
+        private volatile long lastModifiedSeen = -1;
+        private volatile int lastIgnoredHash = 0;
+
+        public ApiHandler(File cacheFile) {
+            this.cacheFile = cacheFile;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            DashboardConfig cfg = DashboardConfig.get();
+            long currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
+            int currentIgnoredHash = cfg.ignored_players != null ? cfg.ignored_players.hashCode() : 0;
+            int currentAliasHash  = cfg.player_aliases  != null ? cfg.player_aliases.hashCode()  : 0;
+            int currentCfgHash = currentIgnoredHash ^ currentAliasHash;
+
+            // 1. Fast path: check memory cache before locking
+            if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentCfgHash == lastIgnoredHash && cachedResponse != null) {
+                String ifNoneMatch = exchange.getRequestHeaders().getFirst("If-None-Match");
+                if (cachedEtag != null && cachedEtag.equals(ifNoneMatch)) {
+                    exchange.sendResponseHeaders(304, -1);
+                    return;
+                }
+                serveCached(exchange, cachedResponse, cachedEtag);
+                return;
+            }
+
+            // 2. Slow path: Refresh cache with double-checked locking
+            synchronized (this) {
+                // Re-fetch lastModified under lock to ensure we don't race with a file write/rename
+                currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
+                
+                if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentCfgHash == lastIgnoredHash && cachedResponse != null) {
+                    // Cache was refreshed by another thread while we were waiting for the lock
+                } else {
+                    refreshCache(currentLastMod, currentCfgHash, cfg);
+                }
+            }
+
+            if (cachedResponse != null) {
+                serveCached(exchange, cachedResponse, cachedEtag);
+            } else {
+                exchange.sendResponseHeaders(500, -1);
+            }
+        }
+
+        private void refreshCache(long currentLastMod, int currentIgnoredHash, DashboardConfig cfg) throws IOException {
+            if (!cacheFile.exists()) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                try (Writer w = new OutputStreamWriter(baos, StandardCharsets.UTF_8);
+                     JsonWriter jw = new JsonWriter(w)) {
+                    jw.beginObject();
+                    jw.name("daily").beginObject().endObject();
+                    jw.name("playerDailyRaw").beginObject().endObject();
+                    jw.name("sessData").beginObject().endObject();
+                    jw.name("hourly").beginObject().endObject();
+                    jw.name("ignored_players").beginArray().endArray();
+                    jw.name("player_aliases").beginObject().endObject();
+                    jw.endObject();
+                }
+                updateCache(baos.toByteArray(), "\"0\"", 0, currentIgnoredHash);
+                return;
+            }
+
+            // Streaming refresh into a memory buffer
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            Map<String, Double> newDaily = new HashMap<>();
+            Set<String> ignored = cfg.getIgnoredLowerNames();
+
+            try (JsonReader reader = new JsonReader(new FileReader(cacheFile));
+                 Writer w = new OutputStreamWriter(baos, StandardCharsets.UTF_8);
+                 JsonWriter writer = new JsonWriter(w)) {
+                
+                reader.beginObject();
+                writer.beginObject();
+                
+                while (reader.hasNext()) {
+                    String name = reader.nextName();
+                    if ("sessData".equals(name)) {
+                        writer.name("sessData");
+                        streamFilteredObject(reader, writer, ignored);
+                    } else if ("playerDailyRaw".equals(name)) {
+                        writer.name("playerDailyRaw");
+                        streamFilteredDailyRaw(reader, writer, ignored, newDaily);
+                    } else if ("hourly".equals(name)) {
+                        writer.name("hourly");
+                        streamFilteredHourly(reader, writer, ignored);
+                    } else {
+                        reader.skipValue();
+                    }
+                }
+                
+                // Append computed summary stats and metadata at the end of the object
+                writer.name("daily");
+                GSON.toJson(newDaily, Map.class, writer);
+                
+                writer.name("ignored_players");
+                GSON.toJson(cfg.ignored_players, List.class, writer);
+
+                writer.name("player_aliases");
+                GSON.toJson(cfg.player_aliases != null ? cfg.player_aliases : java.util.Collections.emptyMap(), Map.class, writer);
+                
+                writer.endObject();
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.error("Failed to refresh API activity cache", e);
+                // We do NOT update the cache on failure, so concurrent requests will try again
+                // or fallback to whatever was there before if we didn't clear it.
+                throw new IOException("Cache refresh failed", e);
+            }
+
+            updateCache(baos.toByteArray(), "\"" + currentLastMod + "\"", currentLastMod, currentIgnoredHash);
+        }
+
+        private void updateCache(byte[] data, String etag, long lastMod, int ignoredHash) {
+            this.cachedResponse = data;
+            this.cachedEtag = etag;
+            this.lastModifiedSeen = lastMod;
+            this.lastIgnoredHash = ignoredHash;
+        }
+
+        private void streamFilteredObject(JsonReader reader, JsonWriter writer, Set<String> ignored) throws IOException {
+            reader.beginObject();
+            writer.beginObject();
+            while (reader.hasNext()) {
+                String player = reader.nextName();
+                if (ignored.contains(player.toLowerCase())) {
+                    reader.skipValue();
+                } else {
+                    writer.name(player);
+                    // Copy value object without full tree parse
+                    JsonElement val = GSON.fromJson(reader, JsonElement.class);
+                    GSON.toJson(val, writer);
+                }
+            }
+            reader.endObject();
+            writer.endObject();
+        }
+
+        private void streamFilteredDailyRaw(JsonReader reader, JsonWriter writer, Set<String> ignored, Map<String, Double> newDaily) throws IOException {
+            reader.beginObject();
+            writer.beginObject();
+            while (reader.hasNext()) {
+                String date = reader.nextName();
+                writer.name(date);
+                reader.beginObject();
+                writer.beginObject();
+                double sumMinutes = 0;
+                while (reader.hasNext()) {
+                    String player = reader.nextName();
+                    double val = reader.nextDouble();
+                    if (!ignored.contains(player.toLowerCase())) {
+                        writer.name(player);
+                        writer.value(val);
+                        sumMinutes += val;
+                    }
+                }
+                reader.endObject();
+                writer.endObject();
+                newDaily.put(date, Math.round((sumMinutes / 60.0) * 100.0) / 100.0);
+            }
+            reader.endObject();
+            writer.endObject();
+        }
+
+        private void streamFilteredHourly(JsonReader reader, JsonWriter writer, Set<String> ignored) throws IOException {
+            reader.beginObject();
+            writer.beginObject();
+            while (reader.hasNext()) {
+                String date = reader.nextName();
+                writer.name(date);
+                reader.beginObject();
+                writer.beginObject();
+                while (reader.hasNext()) {
+                    String player = reader.nextName();
+                    if (ignored.contains(player.toLowerCase())) {
+                        reader.skipValue();
+                    } else {
+                        writer.name(player);
+                        JsonElement val = GSON.fromJson(reader, JsonElement.class);
+                        GSON.toJson(val, writer);
+                    }
+                }
+                reader.endObject();
+                writer.endObject();
+            }
+            reader.endObject();
+            writer.endObject();
+        }
+
+        private void serveCached(HttpExchange exchange, byte[] data, String etag) throws IOException {
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+            exchange.getResponseHeaders().set("ETag", etag);
+
+            boolean useGzip = clientAcceptsGzip(exchange);
+            if (useGzip) {
+                exchange.getResponseHeaders().set("Content-Encoding", "gzip");
+                exchange.sendResponseHeaders(200, 0);
+                try (OutputStream raw = exchange.getResponseBody();
+                     GZIPOutputStream gzos = new GZIPOutputStream(raw)) {
+                    gzos.write(data);
+                }
+            } else {
+                exchange.sendResponseHeaders(200, data.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(data);
+                }
+            }
+        }
+
+        private static boolean clientAcceptsGzip(HttpExchange exchange) {
+            List<String> values = exchange.getRequestHeaders().get("Accept-Encoding");
+            if (values == null) return false;
+            for (String v : values) {
+                if (v != null && v.toLowerCase().contains("gzip")) return true;
+            }
+            return false;
+        }
+    }
+
+
+    private static class LiveMetricsHandler implements HttpHandler {
+        private final DashboardWebServer server;
+        private static final Gson GSON = new Gson();
+
+        public LiveMetricsHandler(DashboardWebServer server) {
+            this.server = server;
+        }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            LiveMetricsSnapshot snapshot = server.liveSnapshot;
+            if (snapshot == null) {
+                snapshot = new LiveMetricsSnapshot(); // warming_up state
+            }
+
+            byte[] response = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
+            exchange.sendResponseHeaders(200, response.length);
+            
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            }
+        }
+    }
+
+    /**
+     * Proxies Dynmap's configuration JSON so the frontend can resolve world ids without CORS failures.
+     */
+    private static class DynmapConfigHandler implements HttpHandler {
+        private volatile byte[] cachedResponse;
+        private volatile long cachedAt;
+        private static final long CACHE_TTL_MS = 5L * 60L * 1000L;
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            String dynmapUrl = DashboardConfig.get().dynmap_url;
+            if (dynmapUrl == null || dynmapUrl.isEmpty()) {
+                exchange.sendResponseHeaders(503, -1);
+                return;
+            }
+
+            byte[] body = cachedResponse;
+            if (body == null || System.currentTimeMillis() - cachedAt > CACHE_TTL_MS) {
+                byte[] fetched = fetchConfig(dynmapUrl);
+                if (fetched != null) {
+                    cachedResponse = fetched;
+                    cachedAt = System.currentTimeMillis();
+                    body = fetched;
+                }
+            }
+
+            if (body == null) {
+                exchange.sendResponseHeaders(502, -1);
+                return;
+            }
+
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        }
+
+        private byte[] fetchConfig(String dynmapUrl) {
+            try {
+                String base = dynmapUrl.split("\\?")[0].split("#")[0];
+                if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+                URL url = new URL(base + "/up/configuration");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(10000);
+                conn.setRequestMethod("GET");
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    FabricDashboardMod.LOGGER.warn("Dynmap config proxy: upstream returned HTTP " + code);
+                    return null;
+                }
+                try (InputStream in = conn.getInputStream();
+                     ByteArrayOutputStream buf = new ByteArrayOutputStream()) {
+                    byte[] tmp = new byte[8192];
+                    int n;
+                    while ((n = in.read(tmp)) != -1) buf.write(tmp, 0, n);
+                    return buf.toByteArray();
+                }
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.warn("Dynmap config proxy: failed to fetch upstream", e);
+                return null;
+            }
+        }
+    }
+
+    private static class RespackHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            File gameDir = FabricLoader.getInstance().getGameDir().toFile();
+            File respackZip = new File(gameDir, "dashboard_respack.zip");
+
+            if (!respackZip.exists() || !respackZip.isFile()) {
+                FabricDashboardMod.LOGGER.warn("Client requested respack.zip but it does not exist.");
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+            
+            FabricDashboardMod.LOGGER.info("Serving respack.zip to client: " + exchange.getRemoteAddress() + " (size: " + respackZip.length() + " bytes)");
+
+            exchange.getResponseHeaders().set("Content-Type", "application/zip");
+            exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+            exchange.getResponseHeaders().set("Pragma", "no-cache");
+            exchange.getResponseHeaders().set("Expires", "0");
+            exchange.sendResponseHeaders(200, respackZip.length());
+
+            try (InputStream is = new FileInputStream(respackZip);
+                 OutputStream os = exchange.getResponseBody()) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    os.write(buffer, 0, bytesRead);
+                }
+            }
+        }
+    }
 }

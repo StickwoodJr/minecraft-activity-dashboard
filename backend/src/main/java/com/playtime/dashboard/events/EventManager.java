@@ -758,10 +758,6 @@ public class EventManager {
             if (byName != null) return byName;
         }
 
-        if (name.equalsIgnoreCase("hanger") || name.equalsIgnoreCase("advent")) {
-            return "Advent/Hanger";
-        }
-
         return name;
     }
 

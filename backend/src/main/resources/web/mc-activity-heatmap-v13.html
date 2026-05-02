@@ -1083,6 +1083,7 @@
       let ranked = [];
       let leaderboardsData = null;
       let ignoredPlayers = [];
+      let PLAYER_ALIASES = {}; // Populated from data.player_aliases on load
       let selectedStatId = 'all_time_event_points';
       let leaderboardSortOrder = 'desc';
       let playerSortMode = 'total';
@@ -1751,17 +1752,17 @@
         if (head) head.textContent = statConf.label;
 
         const normalize = (p) => {
-
-          const low = p.trim().toLowerCase();
-          if (low === 'hanger' || low === 'advent') return 'Advent/Hanger';
-          return p.trim();
+          if (!p) return '';
+          const trimmed = p.trim();
+          const aliased = PLAYER_ALIASES[trimmed.toLowerCase()];
+          return aliased !== undefined ? aliased : trimmed;
         };
 
         // Include all known players (from metadata, playtime totals, and the stat itself)
         const playerSet = new Set();
         [...Object.keys(PLAYER_META), ...Object.keys(playerTotals), ...Object.keys(playersWithStats)].forEach(p => {
           const n = normalize(p);
-          if (n && n.toLowerCase() !== 'hanger' && n.toLowerCase() !== 'advent') playerSet.add(n);
+          if (n) playerSet.add(n);
         });
         
         const sorted = Array.from(playerSet)
@@ -1769,7 +1770,15 @@
             const low = p.toLowerCase();
             return !ignoredPlayers.includes(low) && !isUUID(p);
           })
-          .map(p => [p, playersWithStats[p] || 0])
+          .map(p => {
+            let val = 0;
+            for (const [rawName, rawVal] of Object.entries(playersWithStats)) {
+              if (normalize(rawName) === p) {
+                val += rawVal;
+              }
+            }
+            return [p, val];
+          })
           .sort((a,b) => {
             return leaderboardSortOrder === 'desc' ? b[1] - a[1] : a[1] - b[1];
           });
@@ -2427,12 +2436,18 @@
           console.log("[Playtime] Data received:", data);
           if (statusEl) statusEl.textContent = "Processing data...";
           ignoredPlayers = (data.ignored_players || []).map(s => s.toLowerCase());
+          // Build a lowercase-keyed alias lookup from the config-supplied map
+          const rawAliases = data.player_aliases || {};
+          PLAYER_ALIASES = {};
+          for (const [k, v] of Object.entries(rawAliases)) {
+            PLAYER_ALIASES[k.toLowerCase()] = v;
+          }
           
           const normalize = (p) => {
-            if (!p) return "";
-            const low = p.trim().toLowerCase();
-            if (low === 'hanger' || low === 'advent') return 'Advent/Hanger';
-            return p.trim();
+            if (!p) return '';
+            const trimmed = p.trim();
+            const aliased = PLAYER_ALIASES[trimmed.toLowerCase()];
+            return aliased !== undefined ? aliased : trimmed;
           };
 
           // Deep clean the activity data
