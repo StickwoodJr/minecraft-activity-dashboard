@@ -98,6 +98,8 @@ By default, the dashboard is accessible at `http://<your-server-ip>:8105`.
 | `/dashboard event clearpoints user <name> [amount]` | Clear or reduce all-time points for a specific player. | OP (2) |
 | `/dashboard reparse` | Force a full re-parse of all server logs to refresh activity data. | OP (2) |
 | `/dashboard reload` | Reload the mod configuration. | OP (2) |
+| `/dashboard debug` | Print EventManager persistence health (dirty flag, save counters, executor status). | OP (2) |
+| `/dashboard debug worldsize` | Print world-size executor state: cached size, last/next walk timing, config, and executor status. Submits a thread-identity check to the server log. | OP (2) |
 
 ## Configuration
 Settings are managed via `config/dashboard-config.json`. The file is automatically generated on first run.
@@ -124,6 +126,8 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `resource_pack_url` | `""` | The URL where clients download the custom font resource pack. | **No (Restart Required)** |
 | `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. | Yes |
 | `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. | Yes |
+| `world_size_refresh_minutes` | `30` | How often (in minutes) to recompute the world directory size in the background. | Yes |
+| `world_size_max_depth` | `8` | Maximum directory recursion depth for the world size walk. | Yes |
 
 ## Performance & Privacy
 - **Zero Database**: No SQL setup required; uses an optimized JSON flat-file cache.
