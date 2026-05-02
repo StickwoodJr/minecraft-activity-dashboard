@@ -138,6 +138,10 @@ public class DashboardWebServer {
         return instance;
     }
 
+    public PlayerHeadService getHeadService() {
+        return headService;
+    }
+
     /** Returns the last computed world size in MB (0 until the first walk completes). */
     public long getCachedWorldSizeMb() {
         return cachedWorldSizeMb;
@@ -283,6 +287,14 @@ public class DashboardWebServer {
                 parser.runHistoricalParse(logsDir, cacheFile);
                 FabricDashboardMod.LOGGER.info("[Dashboard] Manual reparse complete. Cache days: " + countCachedDays() + ", cache file: " + cacheFile.getAbsolutePath());
                 triggerHeadFetches();
+
+                // Invalidate the leaderboard cache so the scheduler rebuilds it clean
+                // on its next tick (respecting the configured interval). This prevents
+                // stale player-name keys (e.g. from removed hardcode aliases) from
+                // persisting after an alias config change or a reparse.
+                if (leaderboardCacheFile.exists() && leaderboardCacheFile.delete()) {
+                    FabricDashboardMod.LOGGER.info("[Dashboard] Leaderboard cache invalidated after reparse; will rebuild on next scheduler tick.");
+                }
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("[Dashboard] Manual reparse failed", e);
             }
@@ -421,7 +433,7 @@ public class DashboardWebServer {
     }
 
     /** Scans the cache file for all known player names and kicks off head fetches. */
-    private void triggerHeadFetches() {
+    public void triggerHeadFetches() {
         if (!cacheFile.exists()) return;
         try (Reader reader = new FileReader(cacheFile)) {
             JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
@@ -816,9 +828,11 @@ public class DashboardWebServer {
             DashboardConfig cfg = DashboardConfig.get();
             long currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
             int currentIgnoredHash = cfg.ignored_players != null ? cfg.ignored_players.hashCode() : 0;
+            int currentAliasHash  = cfg.player_aliases  != null ? cfg.player_aliases.hashCode()  : 0;
+            int currentCfgHash = currentIgnoredHash ^ currentAliasHash;
 
             // 1. Fast path: check memory cache before locking
-            if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentIgnoredHash == lastIgnoredHash && cachedResponse != null) {
+            if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentCfgHash == lastIgnoredHash && cachedResponse != null) {
                 String ifNoneMatch = exchange.getRequestHeaders().getFirst("If-None-Match");
                 if (cachedEtag != null && cachedEtag.equals(ifNoneMatch)) {
                     exchange.sendResponseHeaders(304, -1);
@@ -833,10 +847,10 @@ public class DashboardWebServer {
                 // Re-fetch lastModified under lock to ensure we don't race with a file write/rename
                 currentLastMod = cacheFile.exists() ? cacheFile.lastModified() : 0;
                 
-                if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentIgnoredHash == lastIgnoredHash && cachedResponse != null) {
+                if (currentLastMod > 0 && currentLastMod == lastModifiedSeen && currentCfgHash == lastIgnoredHash && cachedResponse != null) {
                     // Cache was refreshed by another thread while we were waiting for the lock
                 } else {
-                    refreshCache(currentLastMod, currentIgnoredHash, cfg);
+                    refreshCache(currentLastMod, currentCfgHash, cfg);
                 }
             }
 
@@ -858,6 +872,7 @@ public class DashboardWebServer {
                     jw.name("sessData").beginObject().endObject();
                     jw.name("hourly").beginObject().endObject();
                     jw.name("ignored_players").beginArray().endArray();
+                    jw.name("player_aliases").beginObject().endObject();
                     jw.endObject();
                 }
                 updateCache(baos.toByteArray(), "\"0\"", 0, currentIgnoredHash);
@@ -898,6 +913,9 @@ public class DashboardWebServer {
                 
                 writer.name("ignored_players");
                 GSON.toJson(cfg.ignored_players, List.class, writer);
+
+                writer.name("player_aliases");
+                GSON.toJson(cfg.player_aliases != null ? cfg.player_aliases : java.util.Collections.emptyMap(), Map.class, writer);
                 
                 writer.endObject();
             } catch (Exception e) {

@@ -175,6 +175,15 @@ public class PlayerHeadService {
         executor.shutdownNow();
     }
 
+    /** Clears the in-memory meta map and deletes the meta.json file to force a fresh rebuild. */
+    public void clearCache() {
+        metaMap.clear();
+        if (metaFile.exists()) {
+            metaFile.delete();
+        }
+        FabricDashboardMod.LOGGER.info("PlayerHeadService cache cleared.");
+    }
+
     // ── Internal pipeline ───────────────────────────────────────
 
     private void fetchPlayer(String playerName) throws Exception {
@@ -204,14 +213,8 @@ public class PlayerHeadService {
     }
 
     private String resolveUUID(String playerName) throws Exception {
-        String lookupName = playerName;
-        if ("Advent/Hanger".equals(playerName)) {
-            lookupName = "Advent";
-        }
-        
-        return com.playtime.dashboard.util.UuidCache.getInstance()
-                .getUuid(lookupName)
-                .map(UUID::toString)
+        return DashboardConfig.get().resolvePrimaryUuid(playerName)
+                .map(java.util.UUID::toString)
                 .map(s -> s.replace("-", ""))
                 .orElse(null);
     }

@@ -2,6 +2,7 @@ package com.playtime.dashboard.stats;
 
 import com.google.gson.stream.JsonReader;
 import com.playtime.dashboard.FabricDashboardMod;
+import com.playtime.dashboard.config.DashboardConfig;
 import com.playtime.dashboard.util.UuidCache;
 
 import java.io.File;
@@ -95,14 +96,12 @@ public class StatsAggregator {
     private String normalizePlayer(String name, String uuidStr) {
         if (name == null) name = uuidStr;
         String n = name.trim();
-        Map<String, String> aliases = com.playtime.dashboard.config.DashboardConfig.get().player_aliases;
-        if (aliases != null) {
-            if (aliases.containsKey(uuidStr)) return aliases.get(uuidStr).trim();
-            if (aliases.containsKey(n)) return aliases.get(n).trim();
-            if (aliases.containsKey(n.toLowerCase())) return aliases.get(n.toLowerCase()).trim();
-        }
-        if (n.equalsIgnoreCase("hanger") || n.equalsIgnoreCase("advent")) {
-            return "Advent/Hanger";
+        Map<String, String> aliases = com.playtime.dashboard.config.DashboardConfig.get().getAliasesLower();
+        if (!aliases.isEmpty()) {
+            String byUuid = aliases.get(uuidStr.toLowerCase());
+            if (byUuid != null) return byUuid;
+            String byName = aliases.get(n.toLowerCase());
+            if (byName != null) return byName;
         }
         return n;
     }
@@ -312,45 +311,8 @@ public class StatsAggregator {
     }
 
     private void streamFile(String username, UuidCache uuidCache, Path dir, OutputStream out, String type) throws IOException {
-        Optional<UUID> uuid = uuidCache.getUuid(username);
-        
-        if (uuid.isEmpty()) {
-            // First check if the username itself is just a raw UUID string
-            try {
-                uuid = Optional.of(UUID.fromString(username));
-                if (!Files.exists(dir.resolve(uuid.get() + ".json"))) {
-                    uuid = Optional.empty(); // Not a valid file, fallback to alias search
-                }
-            } catch (IllegalArgumentException e) {
-                // Not a UUID string, proceed with alias search
-            }
-        }
-        
-        if (uuid.isEmpty()) {
-            // Check if username matches an alias reverse lookup or hardcoded Advent/Hanger
-            if (username.equalsIgnoreCase("Advent/Hanger")) {
-                uuid = uuidCache.getUuid("hanger");
-                if (uuid.isEmpty()) uuid = uuidCache.getUuid("advent");
-            } else {
-                Map<String, String> aliases = com.playtime.dashboard.config.DashboardConfig.get().player_aliases;
-                if (aliases != null) {
-                    for (Map.Entry<String, String> entry : aliases.entrySet()) {
-                        if (entry.getValue().equalsIgnoreCase(username)) {
-                            // The key is either a UUID or a name
-                            try {
-                                uuid = Optional.of(UUID.fromString(entry.getKey()));
-                            } catch (IllegalArgumentException e) {
-                                uuid = uuidCache.getUuid(entry.getKey());
-                            }
-                            if (uuid.isPresent() && Files.exists(dir.resolve(uuid.get() + ".json"))) {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
+        Optional<UUID> uuid = DashboardConfig.get().resolvePrimaryUuid(username);
+
         if (uuid.isEmpty()) {
             throw new FileNotFoundException("Unknown player: " + username);
         }

@@ -43,8 +43,9 @@ public class DashboardConfig {
     public String server_name = "MC Server";
     public String custom_logo_path = ""; // Path to a local .jpg or .png file
     public String favicon_path = "";    // Path to a local .ico, .png, or .jpg file
-    public List<String> ignored_players = Arrays.asList("ironfarmbot", "mobfarmbot", "EinenSoenenAbend", "Hanger");
+    public List<String> ignored_players = Arrays.asList("ironfarmbot", "mobfarmbot");
     public Map<String, String> player_aliases = new java.util.HashMap<>(); // Map UUIDs or Names to a single display name
+    public Map<String, String> primary_player_heads = new java.util.HashMap<>(); // Map a display name to a primary UUID or Name to use for the player head
     public boolean fetch_player_heads = true;      // Fetch Minecraft player heads from Mojang
     public int skin_refresh_hours = DEFAULT_SKIN_REFRESH_HOURS;            // Hours before re-fetching a player's skin
     public String stats_world_name = "world"; // Minecraft world folder name
@@ -119,6 +120,58 @@ public class DashboardConfig {
         return aliasesLower;
     }
 
+    /**
+     * Resolves a player name (which could be a real username or a synthetic alias)
+     * to a primary UUID based on config overrides and alias maps.
+     */
+    public java.util.Optional<java.util.UUID> resolvePrimaryUuid(String playerName) {
+        if (playerName == null || playerName.isEmpty()) return java.util.Optional.empty();
+        
+        com.playtime.dashboard.util.UuidCache cache = com.playtime.dashboard.util.UuidCache.getInstance();
+
+        // 1. Check explicitly defined primary player heads first
+        if (primary_player_heads != null && primary_player_heads.containsKey(playerName)) {
+            String primarySource = primary_player_heads.get(playerName);
+            try {
+                // If the source is a raw UUID, use it directly
+                return java.util.Optional.of(java.util.UUID.fromString(primarySource));
+            } catch (IllegalArgumentException e) {
+                // Otherwise, treat as a username and resolve it
+                return cache.getUuid(primarySource);
+            }
+        }
+
+        // 2. Try to find a source username/UUID that maps to this target alias
+        for (Map.Entry<String, String> entry : aliasesLower.entrySet()) {
+            if (entry.getValue().equalsIgnoreCase(playerName)) {
+                String source = entry.getKey(); // Keys in aliasesLower are lowercased
+                try {
+                    return java.util.Optional.of(java.util.UUID.fromString(source));
+                } catch (IllegalArgumentException e) {
+                    // Key is a name, resolve its UUID
+                    return cache.getUuid(source);
+                }
+            }
+        }
+
+        // 3. Fallback: Standard direct lookup (only if it looks like a real Minecraft name)
+        if (playerName.matches("^[a-zA-Z0-9_]{2,16}$")) {
+            return cache.getUuid(playerName);
+        }
+
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * Normalizes a player name to its canonical display name if an alias exists.
+     */
+    public String getNormalizedName(String playerName) {
+        if (playerName == null) return null;
+        if (aliasesLower == null || aliasesLower.isEmpty()) return playerName;
+        String aliased = aliasesLower.get(playerName.toLowerCase());
+        return (aliased != null) ? aliased : playerName;
+    }
+
     private void recomputeDerived() {
         validateFields();
 
@@ -185,15 +238,19 @@ public class DashboardConfig {
         return value;
     }
 
-    public static void load() {
+    public static boolean load() {
         File configFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "dashboard-config.json");
         DashboardConfig oldConfig = instance;
         DashboardConfig newConfig = null;
+        boolean loadedFromDisk = false;
         boolean newlyCreated = false;
 
         if (configFile.exists()) {
             try (FileReader reader = new FileReader(configFile)) {
                 newConfig = GSON.fromJson(reader, DashboardConfig.class);
+                if (newConfig != null) {
+                    loadedFromDisk = true;
+                }
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to load dashboard config. Reverting to defaults.", e);
             }
@@ -227,6 +284,7 @@ public class DashboardConfig {
         if (newlyCreated) {
             save();
         }
+        return loadedFromDisk;
     }
 
     public static void save() {

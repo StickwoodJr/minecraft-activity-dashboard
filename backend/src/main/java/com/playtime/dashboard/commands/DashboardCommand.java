@@ -410,14 +410,32 @@ public class DashboardCommand {
                         })
                     )
                 )
+                .then(CommandManager.literal("rebuild-meta")
+                    .requires(source -> source.hasPermissionLevel(2))
+                    .executes(context -> {
+                        DashboardWebServer ws = DashboardWebServer.getInstance();
+                        if (ws == null || ws.getHeadService() == null) {
+                            context.getSource().sendError(Text.literal("[Dashboard] Web server or Head Service is not running."));
+                            return 0;
+                        }
+                        ws.getHeadService().clearCache();
+                        ws.triggerHeadFetches();
+                        context.getSource().sendFeedback(() -> Text.literal("§a[Dashboard] Player head metadata cache cleared and rebuild triggered. Heads will appear on the dashboard gradually as they are fetched from Mojang."), true);
+                        return 1;
+                    })
+                )
             )
             .then(CommandManager.literal("reload")
                 .requires(source -> source.hasPermissionLevel(2))
                 .executes(context -> {
-                    com.playtime.dashboard.config.DashboardConfig.load();
+                    boolean success = com.playtime.dashboard.config.DashboardConfig.load();
                     EventManager.getInstance().invalidateScoreboardCache();
-                    context.getSource().sendFeedback(() -> Text.literal("§a[Dashboard] Config reloaded!"), true);
-                    return 1;
+                    if (success) {
+                        context.getSource().sendFeedback(() -> Text.literal("§a[Dashboard] Config reloaded!"), true);
+                    } else {
+                        context.getSource().sendError(Text.literal("[Dashboard] Failed to load config from disk. Reverting to defaults. Check server log for JSON syntax errors."));
+                    }
+                    return success ? 1 : 0;
                 })
             )
             .then(CommandManager.literal("reparse")

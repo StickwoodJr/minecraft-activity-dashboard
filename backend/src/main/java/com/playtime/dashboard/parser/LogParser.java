@@ -294,10 +294,7 @@ public class LogParser {
     }
 
     private String normalizePlayer(String p) {
-        if (p.equalsIgnoreCase("hanger") || p.equalsIgnoreCase("advent")) {
-            return "Advent/Hanger";
-        }
-        return p;
+        return DashboardConfig.get().getNormalizedName(p);
     }
 
     private void closeSession(String player, LocalDateTime startTs, LocalDateTime endTs, DashboardData data) {

@@ -171,7 +171,12 @@ public class UuidCache {
         uuid = nameToUuid.get(key);
         if (uuid != null) return Optional.of(uuid);
 
-        FabricDashboardMod.LOGGER.info("UUID for '" + username + "' not found locally, trying Mojang API...");
+        FabricDashboardMod.LOGGER.info("UUID for '{}' not found locally, trying Mojang API... (at {})", username, 
+                java.util.Arrays.stream(Thread.currentThread().getStackTrace())
+                    .filter(st -> !st.getClassName().contains("UuidCache") && !st.getClassName().contains("Thread"))
+                    .findFirst()
+                    .map(st -> st.getClassName() + ":" + st.getLineNumber())
+                    .orElse("unknown"));
         
         long now = System.currentTimeMillis();
         Long lastAttempt = networkFailedNames.get(key);

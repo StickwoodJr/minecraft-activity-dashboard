@@ -101,6 +101,7 @@ By default, the dashboard is accessible at `http://<your-server-ip>:8105`.
 | `/dashboard debug` | Print EventManager persistence health (dirty flag, save counters, executor status). | OP (2) |
 | `/dashboard debug worldsize` | Print world-size executor state: cached size, last/next walk timing, config, and executor status. Submits a thread-identity check to the server log. | OP (2) |
 | `/dashboard debug uuid <identifier>` | Inspect UUID/Name cache state (Runtime/Disk/Network), last network attempt timing, and cooldown status. | OP (2) |
+| `/dashboard debug rebuild-meta` | Clear the player head metadata cache and force a fresh rebuild of `meta.json`. | OP (2) |
 
 ## Configuration
 Settings are managed via `config/dashboard-config.json`. The file is automatically generated on first run.
@@ -116,7 +117,8 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 | `custom_logo_path` | `""` | Path to a local `.jpg` or `.png` for the dashboard logo. | Yes |
 | `enable_dynmap` | `true` | Toggle the Dynmap tab on/off. | Yes |
 | `dynmap_url` | `""` | The URL of your Dynmap instance. | Yes |
-| `ignored_players` | `[]` | List of player names to exclude from all stats. | Yes |
+| `ignored_players` | `["ironfarmbot", "mobfarmbot"]` | List of player names to exclude from all stats and leaderboards (case-insensitive). | Yes |
+| `player_aliases` | `{}` | Map raw player names or UUIDs to a single canonical display name. See [Player Aliases](#player-aliases) below. | Yes |
 | `max_concurrent_events` | `3` | Maximum number of events that can run at once. | Yes |
 | `streak_timezone` | `"America/Toronto"` | Timezone used for daily streak calculation. | Yes |
 | `streak_minimum_minutes_per_day` | `60` | Minutes required in a day to maintain a streak. | Yes |
@@ -137,3 +139,57 @@ Settings are managed via `config/dashboard-config.json`. The file is automatical
 - **Efficient API Delivery**: Utilizes ETag/304 conditional caching and memory-efficient streaming for optimal performance under heavy load.
 - **Crash Resilience**: Precise log parsing capable of intelligently tracking ghost sessions and reconstructing clean timestamps even during unexpected server crashes.
 - **Case-Insensitive Filters**: Robust, unified privacy controls to consistently hide bots, admins, or specific players from public view across all metrics.
+
+## Player Aliases
+
+The `player_aliases` config key lets you merge multiple usernames or UUIDs into a single display name without modifying any code. This is the canonical way to handle players who have changed their in-game name, or to represent two accounts as one identity on the dashboard.
+
+### Normalization Order
+
+Every player identifier is resolved in this fixed order:
+
+1. **Raw name** — the name as it appears in the log or stats file.
+2. **`player_aliases` lookup** — the raw name (or UUID) is checked against the map keys (case-insensitive). If a match is found, the mapped value becomes the canonical display name.
+3. **Ignore check** — if the canonical name or UUID appears in `ignored_players`, the entry is excluded from all output.
+
+### Configuration Syntax
+
+Keys can be either a **Minecraft username** or a **UUID** (with or without dashes). Values are the canonical display name shown everywhere on the dashboard.
+
+```json
+"player_aliases": {
+  "OldUsername": "NewUsername",
+  "hanger": "Advent/Hanger",
+  "advent": "Advent/Hanger",
+  "550e8400-e29b-41d4-a716-446655440000": "Advent/Hanger"
+}
+```
+
+> **Tip:** When both a username key and a UUID key map to the same display name, the UUID match takes priority (checked first). This ensures the correct identity is used even if the player has changed their name.
+
+### Example: Merging Two Accounts
+
+If a player has played under two names, map both to the same canonical name:
+
+```json
+"player_aliases": {
+  "hanger": "Advent/Hanger",
+  "advent": "Advent/Hanger"
+}
+```
+
+All historical sessions, leaderboard entries, daily streaks, and profile data for both names will appear under `"Advent/Hanger"` on the dashboard. This ensures that if "Hanger" plays one day and "Advent" plays the next, the combined identity maintains a continuous activity streak.
+
+### Primary Player Heads
+
+When merging players into a single synthetic display name that is not a valid Minecraft username (e.g., `"Advent/Hanger"`), Mojang will be unable to directly resolve a player head. While the system attempts to reverse-lookup a valid source name from your `player_aliases` map, you can explicitly define which source player's head should be used by configuring `primary_player_heads`.
+
+Keys are the canonical display name, and values are the primary Minecraft name or UUID to fetch the head for:
+
+```json
+"primary_player_heads": {
+  "Advent/Hanger": "Hanger"
+}
+```
+
+If you modify this map, use the `/dashboard debug rebuild-meta` command to wipe the head metadata cache and force the server to fetch the updated head on the next web request.
