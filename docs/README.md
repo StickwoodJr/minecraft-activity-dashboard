@@ -8,18 +8,18 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 
 ## Dashboard Features
 
-### 📅 Activity Heatmap
+### \ud83d\udcc5 Activity Heatmap
 *   **GitHub-Style Calendar**: Visualize server activity over months with intensity-coded tiles.
 *   **Player Filtering**: Search and filter the heatmap by player to see their specific activity patterns and busiest days.
 *   **Interactive Day Details**: Click any day to see a detailed player breakdown, including a pie chart of playtime distribution and an hourly activity graph.
 *   **Deep Linking**: Navigate directly from a player's profile to their busiest day in history.
 
-### 🔍 Global Player Search
+### \ud83d\udd0d Global Player Search
 *   **Omni-Search**: Quickly find any player across the entire server history from the main header.
 *   **Shortcut Support**: Access the search bar instantly using `Ctrl+K` (or `Cmd+K` on Mac).
 *   **Instant Drill-Down**: Selecting a player from the search results opens their full profile modal with 3D skin and session analytics.
 
-### 🏆 Global Leaderboards
+### \ud83c\udfc6 Global Leaderboards
 *   **Automatic Aggregation**: The mod scans Minecraft world stats to build leaderboards for:
     *   Total Distance Traveled (converted to km)
     *   Player Kills & Mob Kills
@@ -27,24 +27,24 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
     *   Special stats like Totems Used, Event Points, and more.
 *   **Interactive Sorting**: Search and sort leaderboards by any metric and click players to view their full activity profile.
 
-### 👤 Intelligent Player Profiles
+### \ud83d\udc64 Intelligent Player Profiles
 *   **3D Skin Viewer**: Real-time 3D player model rendering with walking animations.
 *   **Session Analytics**: View total playtime, session counts, average session length, and the elusive "Longest Session."
 *   **Status Indicators**: Visual indicators representing online/offline status natively integrated throughout the dashboard profiles.
 
-### 🗺️ Live Dynmap Integration
+### \ud83d\uddfa\ufe0f Live Dynmap Integration
 *   **Embedded World Map**: View your live [Dynmap](https://www.curseforge.com/minecraft/mc-mods/dynmap) directly inside the dashboard.
 *   **State-Preserving Tabs**: Switch between playtime stats and the live map without losing your zoom level or position.
 *   **Togglable**: Easily enable or disable the map tab via configuration.
 
-### ⚡ Live Server Performance
+### \u26a1 Live Server Performance
 *   **Real-Time Metrics**: Monitor Server TPS, MSPT (Tick Times), CPU usage, and JVM Memory directly from the dashboard.
 *   **Container Optimized**: Specialized support for Pterodactyl/Docker environments, reporting actual folder size (`/home/container`) rather than misleading host partition data.
 *   **Live Player List**: See who is online right now. View live player coordinates, and click any online player to jump straight to their full activity history.
 *   **Header KPI Widget**: Monitor players, TPS, and MSPT instantly from the main header, regardless of which tab you are currently viewing.
 *   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
 
-### 🎖️ Server Events & Competitions
+### \ud83c\udf96\ufe0f Server Events & Competitions
 *   **Multiple Concurrent Events**: Run multiple competitions simultaneously (e.g., "Mega Mining Mayhem" and "Playtime Challenge").
 *   **Admin-Driven Events**: Create timed competitions using `/dashboard event create`. Supported types: `playtime`, `mob_kills`, `blocks_placed`, `blocks_mined`, `fewest_deaths`, `damage_dealt`, `player_kills`, `fish_caught`, `daily_streak`, `obsidian_placed`, and `obsidian_mined`.
 *   **Live Scoreboards**: Progress is tracked in real-time on a premium in-game sidebar. Each player can choose which event to track via `/dashboard event scoreboard`.
@@ -56,7 +56,7 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Web Leaderboard**: A dedicated "Events" tab on the dashboard with individual cards for each active event, live timers, and interactive leaderboards.
 *   **Automatic Rewards**: Earn "All-Time Points" for top placements, tracked on a permanent server-wide leaderboard.
 
-### 🔥 Daily Playtime Streaks
+### \ud83d\udd25 Daily Playtime Streaks
 *   **Activity Milestones**: Automatically tracks players who reach 60 minutes of playtime in a calendar day.
 *   **Log-Derived Persistence**: Streaks are calculated from historical activity logs, ensuring consistency even after server restarts.
 *   **Visual Recognition**: Current streaks are displayed in player profiles and have their own dedicated "Daily Playtime Streak" leaderboard.
