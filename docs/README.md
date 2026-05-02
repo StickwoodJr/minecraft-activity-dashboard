@@ -101,25 +101,26 @@ By default, the dashboard is accessible at `http://<your-server-ip>:8105`.
 ## Configuration
 Settings are managed via `config/dashboard-config.json`. The file is automatically generated on first run.
 
-| Setting | Default | Description |
-| :--- | :--- | :--- |
-| `web_port` | `8105` | The port the dashboard web server listens on. |
-| `logs_directory` | `""` | Custom path to server logs (defaults to `./logs`). |
-| `stats_world_name` | `"world"` | The name of your world folder to read stats from. |
-| `tab_title` | `"Playtime Dashboard"` | The browser tab title. |
-| `dashboard_title` | `"Activity Dashboard"` | The main heading on the dashboard. |
-| `custom_logo_path` | `""` | Path to a local `.jpg` or `.png` for the dashboard logo. |
-| `enable_dynmap` | `true` | Toggle the Dynmap tab on/off. |
-| `dynmap_url` | `""` | The URL of your Dynmap instance. |
-| `ignored_players` | `[]` | List of player names to exclude from all stats. |
-| `max_concurrent_events` | `3` | Maximum number of events that can run at once. |
-| `streak_timezone` | `"America/Toronto"` | Timezone used for daily streak calculation. |
-| `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. |
-| `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. |
-| `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. |
-| `resource_pack_url` | `""` | The URL where clients download the custom font resource pack. |
-| `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. |
-| `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. |
+| Setting | Default | Description | Hot-Reloadable |
+| :--- | :--- | :--- | :--- |
+| `config_version` | `1` | Configuration schema version. | Yes |
+| `web_port` | `8105` | The port the dashboard web server listens on. | **No (Restart Required)** |
+| `logs_directory` | `""` | Custom path to server logs (defaults to `./logs`). | **No (Restart Required)** |
+| `stats_world_name` | `"world"` | The name of your world folder to read stats from. | **No (Restart Required)** |
+| `tab_title` | `"Playtime Dashboard"` | The browser tab title. | Yes |
+| `dashboard_title` | `"Activity Dashboard"` | The main heading on the dashboard. | Yes |
+| `custom_logo_path` | `""` | Path to a local `.jpg` or `.png` for the dashboard logo. | Yes |
+| `enable_dynmap` | `true` | Toggle the Dynmap tab on/off. | Yes |
+| `dynmap_url` | `""` | The URL of your Dynmap instance. | Yes |
+| `ignored_players` | `[]` | List of player names to exclude from all stats. | Yes |
+| `max_concurrent_events` | `3` | Maximum number of events that can run at once. | Yes |
+| `streak_timezone` | `"America/Toronto"` | Timezone used for daily streak calculation. | Yes |
+| `incremental_update_interval_minutes` | `5` | Frequency of log scanning for new data. | Yes |
+| `leaderboard_update_interval_minutes` | `10` | Frequency of world stats aggregation. | Yes |
+| `fetch_player_heads` | `true` | Enable fetching skin textures from Mojang API. | Yes |
+| `resource_pack_url` | `""` | The URL where clients download the custom font resource pack. | **No (Restart Required)** |
+| `enable_live_tab` | `true` | Toggle the Live Metrics tab on/off. | Yes |
+| `live_update_interval_seconds` | `3` | Frequency of performance metrics polling. | Yes |
 
 ## Performance & Privacy
 - **Zero Database**: No SQL setup required; uses an optimized JSON flat-file cache.

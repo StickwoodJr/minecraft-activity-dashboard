@@ -21,8 +21,18 @@ import java.util.Map;
 import java.util.HashMap;
 
 public class DashboardConfig {
-    public int web_port = 8105;
-    public int incremental_update_interval_minutes = 5;
+    public static final int CURRENT_CONFIG_VERSION = 1;
+    public static final int DEFAULT_WEB_PORT = 8105;
+    public static final int DEFAULT_INCREMENTAL_UPDATE_INTERVAL = 5;
+    public static final int DEFAULT_SKIN_REFRESH_HOURS = 24;
+    public static final int DEFAULT_LEADERBOARD_UPDATE_INTERVAL = 10;
+    public static final int DEFAULT_LIVE_UPDATE_INTERVAL = 3;
+    public static final int DEFAULT_MAX_CONCURRENT_EVENTS = 3;
+    public static final int DEFAULT_STREAK_MINIMUM_MINUTES = 60;
+
+    public int config_version = CURRENT_CONFIG_VERSION;
+    public int web_port = DEFAULT_WEB_PORT;
+    public int incremental_update_interval_minutes = DEFAULT_INCREMENTAL_UPDATE_INTERVAL;
     public String logs_directory = ""; // Leave empty to use default (game_dir/logs)
     public String dashboard_title = "Activity Dashboard";
     public String dashboard_description = "Combined playtime from join/leave events";
@@ -33,17 +43,17 @@ public class DashboardConfig {
     public List<String> ignored_players = Arrays.asList("ironfarmbot", "mobfarmbot", "EinenSoenenAbend", "Hanger");
     public Map<String, String> player_aliases = new java.util.HashMap<>(); // Map UUIDs or Names to a single display name
     public boolean fetch_player_heads = true;      // Fetch Minecraft player heads from Mojang
-    public int skin_refresh_hours = 24;            // Hours before re-fetching a player's skin
+    public int skin_refresh_hours = DEFAULT_SKIN_REFRESH_HOURS;            // Hours before re-fetching a player's skin
     public String stats_world_name = "world"; // Minecraft world folder name
-    public int leaderboard_update_interval_minutes = 10; // Can differ from incremental_update_interval_minutes
+    public int leaderboard_update_interval_minutes = DEFAULT_LEADERBOARD_UPDATE_INTERVAL; // Can differ from incremental_update_interval_minutes
     public boolean enable_dynmap = true;
     public String dynmap_url = "http://149.56.155.7:8032";
     public boolean enable_live_tab = true;
-    public int live_update_interval_seconds = 3;
+    public int live_update_interval_seconds = DEFAULT_LIVE_UPDATE_INTERVAL;
     public String resource_pack_url = "http://149.56.155.7:8105/respack.zip"; // Sets resource-pack in server.properties if not empty
-    public int max_concurrent_events = 3;
+    public int max_concurrent_events = DEFAULT_MAX_CONCURRENT_EVENTS;
     public String streak_timezone = "America/Toronto";
-    public int streak_minimum_minutes_per_day = 60;
+    public int streak_minimum_minutes_per_day = DEFAULT_STREAK_MINIMUM_MINUTES;
     public int streak_cache_ttl_minutes = -1; // -1 means inherit incremental_update_interval_minutes
     public boolean allow_pvp_events = true;
 
@@ -104,6 +114,8 @@ public class DashboardConfig {
     }
 
     private void recomputeDerived() {
+        validateFields();
+
         // Validate timezone
         try {
             java.time.ZoneId.of(streak_timezone);
@@ -135,23 +147,71 @@ public class DashboardConfig {
         aliasesLower = Collections.unmodifiableMap(al);
     }
 
+    private void validateFields() {
+        if (config_version != CURRENT_CONFIG_VERSION) {
+            FabricDashboardMod.LOGGER.info("Config version {} found, expected {} — some defaults may apply.", config_version, CURRENT_CONFIG_VERSION);
+            config_version = CURRENT_CONFIG_VERSION;
+        }
+
+        web_port = checkRange("web_port", web_port, 1024, 65535, DEFAULT_WEB_PORT);
+        incremental_update_interval_minutes = checkRange("incremental_update_interval_minutes", incremental_update_interval_minutes, 1, 1440, DEFAULT_INCREMENTAL_UPDATE_INTERVAL);
+        skin_refresh_hours = checkRange("skin_refresh_hours", skin_refresh_hours, 1, 8760, DEFAULT_SKIN_REFRESH_HOURS);
+        leaderboard_update_interval_minutes = checkRange("leaderboard_update_interval_minutes", leaderboard_update_interval_minutes, 1, 1440, DEFAULT_LEADERBOARD_UPDATE_INTERVAL);
+        live_update_interval_seconds = checkRange("live_update_interval_seconds", live_update_interval_seconds, 1, 300, DEFAULT_LIVE_UPDATE_INTERVAL);
+        max_concurrent_events = checkRange("max_concurrent_events", max_concurrent_events, 1, 50, DEFAULT_MAX_CONCURRENT_EVENTS);
+        streak_minimum_minutes_per_day = checkRange("streak_minimum_minutes_per_day", streak_minimum_minutes_per_day, 1, 1440, DEFAULT_STREAK_MINIMUM_MINUTES);
+        
+        // streak_cache_ttl_minutes can be -1 (special value)
+        if (streak_cache_ttl_minutes != -1) {
+            streak_cache_ttl_minutes = checkRange("streak_cache_ttl_minutes", streak_cache_ttl_minutes, 1, 1440, -1);
+        }
+    }
+
+    private int checkRange(String key, int value, int min, int max, int defaultValue) {
+        if (value < min || value > max) {
+            FabricDashboardMod.LOGGER.warn("Invalid config key '{}': {}. Must be between {} and {}. Using default: {}", key, value, min, max, defaultValue);
+            return defaultValue;
+        }
+        return value;
+    }
+
     public static void load() {
         File configFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "dashboard-config.json");
+        DashboardConfig oldConfig = instance;
+        DashboardConfig newConfig = null;
         boolean newlyCreated = false;
+
         if (configFile.exists()) {
             try (FileReader reader = new FileReader(configFile)) {
-                instance = GSON.fromJson(reader, DashboardConfig.class);
+                newConfig = GSON.fromJson(reader, DashboardConfig.class);
             } catch (Exception e) {
                 FabricDashboardMod.LOGGER.error("Failed to load dashboard config. Reverting to defaults.", e);
             }
         }
         
-        if (instance == null) {
-            instance = new DashboardConfig();
+        if (newConfig == null) {
+            newConfig = new DashboardConfig();
             newlyCreated = true;
         }
 
+        instance = newConfig;
         instance.recomputeDerived();
+
+        // Check for restart-required field changes
+        if (oldConfig != null) {
+            if (oldConfig.web_port != instance.web_port) {
+                FabricDashboardMod.LOGGER.warn("Config key 'web_port' changed to {}. A restart is required for this change to take effect.", instance.web_port);
+            }
+            if (!java.util.Objects.equals(oldConfig.logs_directory, instance.logs_directory)) {
+                FabricDashboardMod.LOGGER.warn("Config key 'logs_directory' changed. A restart is required for this change to take effect.");
+            }
+            if (!java.util.Objects.equals(oldConfig.stats_world_name, instance.stats_world_name)) {
+                FabricDashboardMod.LOGGER.warn("Config key 'stats_world_name' changed. A restart is required for this change to take effect.");
+            }
+            if (!java.util.Objects.equals(oldConfig.resource_pack_url, instance.resource_pack_url)) {
+                FabricDashboardMod.LOGGER.warn("Config key 'resource_pack_url' changed. A restart is required for this change to take effect.");
+            }
+        }
 
         // Only save if it's a brand new config to avoid overwriting user edits
         if (newlyCreated) {
