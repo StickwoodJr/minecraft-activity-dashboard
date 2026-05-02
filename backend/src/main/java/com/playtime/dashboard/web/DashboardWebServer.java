@@ -26,6 +26,7 @@ import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -51,11 +52,15 @@ public class DashboardWebServer {
     private final StatsAggregator statsAggregator;
     private final UuidCache uuidCache;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
+    private final ExecutorService worldSizeExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "dashboard-world-size");
+        t.setDaemon(true);
+        return t;
+    });
     private volatile LiveMetricsSnapshot liveSnapshot;
     private volatile long cachedWorldSizeMb = 0;
     private volatile long lastWorldSizeCheck = 0;
-    private static final long WORLD_SIZE_REFRESH_MS = 30L * 60L * 1000L;
-    private static final int WORLD_SIZE_MAX_DEPTH = 8;
+    private volatile long lastWorldDirModified = -1;
 
     public static class LivePlayerEntry {
         public final String name;
@@ -131,6 +136,42 @@ public class DashboardWebServer {
 
     public static DashboardWebServer getInstance() {
         return instance;
+    }
+
+    /** Returns the last computed world size in MB (0 until the first walk completes). */
+    public long getCachedWorldSizeMb() {
+        return cachedWorldSizeMb;
+    }
+
+    /** Returns the epoch-ms timestamp of the last time a world-size walk was submitted (0 = never). */
+    public long getLastWorldSizeCheck() {
+        return lastWorldSizeCheck;
+    }
+
+    /** Returns true if the world-size executor has been shut down. */
+    public boolean isWorldSizeExecutorShutdown() {
+        return worldSizeExecutor.isShutdown();
+    }
+
+    /** Returns true if the world-size executor has terminated (all tasks finished after shutdown). */
+    public boolean isWorldSizeExecutorTerminated() {
+        return worldSizeExecutor.isTerminated();
+    }
+
+    /**
+     * Submits a no-op task to the world-size executor that logs its thread name and daemon status.
+     * Intended for use by {@code /dashboard debug worldsize} only.
+     *
+     * @throws java.util.concurrent.RejectedExecutionException if the executor has shut down in the
+     *         narrow race window between the caller's {@link #isWorldSizeExecutorShutdown()} check
+     *         and this call. Callers should catch this exception.
+     */
+    public void submitWorldSizeThreadIdentityCheck() {
+        worldSizeExecutor.execute(() ->
+            FabricDashboardMod.LOGGER.info(
+                "[Dashboard/debug] worldSizeExecutor thread: {}, daemon: {}",
+                Thread.currentThread().getName(),
+                Thread.currentThread().isDaemon()));
     }
 
     public void start() {
@@ -296,12 +337,27 @@ public class DashboardWebServer {
             double diskFreeGb = targetDir.getUsableSpace() / (1024.0 * 1024.0 * 1024.0);
             double diskUsedGb = diskTotalGb - diskFreeGb;
 
-            // World Size: bounded walk over the world dir only, refreshed every 30 minutes.
-            if (System.currentTimeMillis() - lastWorldSizeCheck > WORLD_SIZE_REFRESH_MS) {
-                File worldDir = new File(FabricLoader.getInstance().getGameDir().toFile(),
-                        DashboardConfig.get().stats_world_name);
-                cachedWorldSizeMb = calculateDirectorySize(worldDir) / (1024 * 1024);
-                lastWorldSizeCheck = System.currentTimeMillis();
+            // World Size: offload to background executor with change detection
+            long refreshMs = DashboardConfig.get().world_size_refresh_minutes * 60_000L;
+            if (System.currentTimeMillis() - lastWorldSizeCheck > refreshMs) {
+                lastWorldSizeCheck = System.currentTimeMillis(); // set before submit to prevent double-submit
+                worldSizeExecutor.execute(() -> {
+                    try {
+                        File worldDir = new File(FabricLoader.getInstance().getGameDir().toFile(),
+                                DashboardConfig.get().stats_world_name);
+                        if (!worldDir.exists()) return;
+                        
+                        long currentModified = worldDir.lastModified();
+                        if (currentModified == lastWorldDirModified && cachedWorldSizeMb > 0) return;
+
+                        long newMb = calculateDirectorySize(worldDir,
+                                DashboardConfig.get().world_size_max_depth) / (1024 * 1024);
+                        cachedWorldSizeMb = newMb;
+                        lastWorldDirModified = currentModified;
+                    } catch (Exception e) {
+                        FabricDashboardMod.LOGGER.warn("World size background update failed", e);
+                    }
+                });
             }
 
             this.liveSnapshot = new LiveMetricsSnapshot(playersOnline, maxPlayers, playerNames,
@@ -314,14 +370,15 @@ public class DashboardWebServer {
         }
     }
 
-    private long calculateDirectorySize(File directory) {
+
+    private long calculateDirectorySize(File directory, int maxDepth) {
         if (directory == null || !directory.exists() || !directory.isDirectory()) return 0;
         final long[] total = {0L};
         try {
             java.nio.file.Files.walkFileTree(
                 directory.toPath(),
                 java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class),
-                WORLD_SIZE_MAX_DEPTH,
+                maxDepth,
                 new java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
                     @Override
                     public java.nio.file.FileVisitResult visitFile(java.nio.file.Path file,
@@ -377,6 +434,14 @@ public class DashboardWebServer {
         }
         if (scheduler != null) {
             scheduler.shutdownNow();
+        }
+        if (worldSizeExecutor != null) {
+            worldSizeExecutor.shutdownNow();
+            try {
+                worldSizeExecutor.awaitTermination(2, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
         }
         if (headService != null) {
             headService.shutdown();

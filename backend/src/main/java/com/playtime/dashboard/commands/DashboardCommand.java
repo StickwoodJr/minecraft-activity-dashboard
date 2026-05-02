@@ -3,6 +3,8 @@ package com.playtime.dashboard.commands;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.playtime.dashboard.FabricDashboardMod;
+import com.playtime.dashboard.config.DashboardConfig;
 import com.playtime.dashboard.events.EventManager;
 import com.playtime.dashboard.events.ServerEvent;
 import com.playtime.dashboard.web.DashboardWebServer;
@@ -538,5 +540,16 @@ public class DashboardCommand {
         if (m > 0 || h > 0 || d > 0) sb.append(m).append("m ");
         sb.append(s).append("s");
         return sb.toString();
+    }
+
+    /**
+     * Formats an elapsed number of seconds as a compact human-readable string,
+     * e.g. "2m 14s" or "45s". Used by the worldsize debug subcommand.
+     */
+    private static String formatElapsed(long seconds) {
+        long m = seconds / 60;
+        long s = seconds % 60;
+        if (m > 0) return m + "m " + s + "s";
+        return s + "s";
     }
 }
