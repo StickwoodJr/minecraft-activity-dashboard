@@ -1279,22 +1279,22 @@
         if (!grid) { console.error("[Debug] heatmapGrid missing!"); return; }
         grid.innerHTML = '';
         const dates = Object.keys(daily).sort();
-        let start, end, today;
+        const today = new Date();
         if (dates.length > 0) {
           const firstDate = new Date(dates[0] + 'T12:00:00');
           const lastDate = new Date(dates[dates.length - 1] + 'T12:00:00');
           // Start on the first day of the month of the first data point
           start = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
-          // End on the last day of the month of the last data point
-          end = new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 0);
-          today = new Date();
+          // End on the last day of the month of the last data point, but cap at today to avoid future gaps
+          const endOfMonth = new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 0);
+          end = (endOfMonth > today) ? today : endOfMonth;
           const mnames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           const desc = `Combined playtime from join/leave events &middot; ${mnames[firstDate.getMonth()]} ${firstDate.getDate()} &ndash; ${mnames[lastDate.getMonth()]} ${lastDate.getDate()}, ${lastDate.getFullYear()}`;
           document.getElementById('pageSub').innerHTML = desc;
         } else {
           start = new Date(); start.setDate(1);
-          end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
-          today = new Date();
+          const endOfMonth = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+          end = (endOfMonth > today) ? today : endOfMonth;
         }
 
         // Calculate max hours for color scaling
