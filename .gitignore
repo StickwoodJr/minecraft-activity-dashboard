@@ -21,7 +21,6 @@ crash-reports/
 
 # Generated data/configs (to keep them strictly local)
 dashboard_cache.json
-dashboard-config.json
 
 # OS artifacts
 .DS_Store

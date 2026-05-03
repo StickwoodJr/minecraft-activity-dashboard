@@ -22,48 +22,255 @@ import java.util.Set;
 import java.util.UUID;
 
 public class StatsAggregator {
-    private static final Set<String> ITEM_SUFFIXES = new HashSet<>(Arrays.asList(
-        "_sword", "_pickaxe", "_axe", "_shovel", "_hoe", "_helmet", "_chestplate", "_leggings", "_boots",
-        "_bucket", "_potion", "_stew", "_soup", "_bottle", "_pearl", "_egg", "_rod", "_shears", "_bow",
-        "_crossbow", "_trident", "_shield", "_rod", "_flint_and_steel", "_spyglass", "_compass", "_clock"
-    ));
-    
-    private static final Set<String> ITEM_NAMES = new HashSet<>(Arrays.asList(
-        "minecraft:apple", "minecraft:bread", "minecraft:steak", "minecraft:cooked_porkchop", "minecraft:cooked_mutton",
-        "minecraft:cooked_chicken", "minecraft:cooked_rabbit", "minecraft:cooked_cod", "minecraft:cooked_salmon",
-        "minecraft:carrot", "minecraft:potato", "minecraft:baked_potato", "minecraft:poisonous_potato", "minecraft:golden_apple",
-        "minecraft:enchanted_golden_apple", "minecraft:mushroom_stew", "minecraft:suspicious_stew", "minecraft:cookie",
-        "minecraft:pumpkin_pie", "minecraft:sugar", "minecraft:cake", "minecraft:milk_bucket", "minecraft:honey_bottle",
-        "minecraft:egg", "minecraft:wheat", "minecraft:pumpkin", "minecraft:melon_slice", "minecraft:sweet_berries",
-        "minecraft:glow_berries", "minecraft:chorus_fruit", "minecraft:popped_chorus_fruit", "minecraft:rotten_flesh",
-        "minecraft:spider_eye", "minecraft:fermented_spider_eye", "minecraft:poisonous_potato", "minecraft:pufferfish"
-    ));
+    private boolean isBlockPlacement(String statId) {
+        DashboardConfig config = DashboardConfig.get();
+        if (config.item_names.contains(statId)) return false;
+        for (String suffix : config.item_suffixes) {
+            if (statId.endsWith(suffix)) return false;
+        }
+        return true;
+    }
 
-    public Map<String, Double> getGlobalStats(Path statsDir, String statType, UuidCache uuidCache) {
-        Map<String, Double> results = new HashMap<>();
+    public Map<String, Map<String, Map<String, Integer>>> buildLeaderboards(Path statsDir, UuidCache uuidCache) {
+        // Map<Category, Map<Stat, Map<PlayerName, Value>>>
+        Map<String, Map<String, Map<String, Integer>>> result = new HashMap<>();
+        Map<String, String> playerToUuid = new HashMap<>();
+
         File[] files = statsDir.toFile().listFiles((d, n) -> n.endsWith(".json"));
-        if (files == null) return results;
+        if (files == null) return result;
 
-        for (File f : files) {
-            String uuid = f.getName().replace(".json", "");
-            if (DashboardConfig.get().isPlayerIgnored(uuid)) continue;
+        for (File statFile : files) {
+            String uuidStr = statFile.getName().replace(".json", "");
+            UUID uuid;
+            try {
+                uuid = UUID.fromString(uuidStr);
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
 
-            Optional<String> name = uuidCache.getUsername(UUID.fromString(uuid));
-            if (name.isEmpty()) continue;
+            String rawName = uuidCache.getUsername(uuid).orElse(uuidStr);
+            String playerName = normalizePlayer(rawName, uuidStr);
             
-            String displayName = DashboardConfig.get().getNormalizedName(name.get());
-            if (DashboardConfig.get().isPlayerIgnored(displayName)) continue;
+            if (isUuidString(playerName)) continue;
+            if (com.playtime.dashboard.config.DashboardConfig.get().isIgnored(playerName, uuidStr)) continue;
 
-            try (JsonReader reader = new JsonReader(new FileReader(f))) {
-                double val = parseStatValue(reader, statType);
-                if (val > 0) {
-                    results.merge(displayName, val, Double::sum);
-                }
-            } catch (IOException e) {
-                FabricDashboardMod.LOGGER.error("Failed to parse " + f.getName(), e);
+            playerToUuid.putIfAbsent(playerName, uuidStr);
+
+            try (JsonReader reader = new JsonReader(new FileReader(statFile))) {
+                parseStatsIntoMap(reader, playerName, result);
+            } catch (Exception e) {
+                FabricDashboardMod.LOGGER.warn("Skipping malformed stats file: " + statFile.getName());
             }
         }
-        return results;
+
+        // --- Post-process Playstyle Leaderboards ---
+        calculateAndInjectPlaystyleScores(result, playerToUuid, statsDir.getParent());
+
+        return result;
+    }
+
+    private boolean isUuidString(String str) {
+        if (str == null) return false;
+        String s = str.trim();
+        // Handle both dashed (36) and undashed (32) UUIDs
+        if (s.length() != 36 && s.length() != 32) return false;
+        // Match hex chars and optional dashes
+        return s.matches("^[0-9a-fA-F-]+$");
+    }
+
+    private String normalizePlayer(String name, String uuidStr) {
+        return DashboardConfig.get().getNormalizedName(name, uuidStr);
+    }
+
+    private void parseStatsIntoMap(JsonReader reader, String playerName, Map<String, Map<String, Map<String, Integer>>> result) throws IOException {
+        reader.beginObject();
+        long distanceCm = 0;
+        int damageTaken = 0;
+        int damageDealt = 0;
+        int totalMined = 0;
+        int totalUsed = 0;
+        int redstoneUsed = 0;
+        int mobKills = 0;
+
+        Map<String, Map<String, Integer>> filteredCategory = result.computeIfAbsent("general", k -> new HashMap<>());
+
+        while (reader.hasNext()) {
+            String rootKey = reader.nextName();
+            if ("stats".equals(rootKey)) {
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    String category = reader.nextName();
+                    reader.beginObject();
+                    while (reader.hasNext()) {
+                        String stat = reader.nextName();
+                        int value = reader.nextInt();
+
+                        if ("minecraft:mined".equals(category)) {
+                            totalMined += value;
+                        } else if ("minecraft:used".equals(category)) {
+                            if (isBlockPlacement(stat)) totalUsed += value;
+                            if (isRedstone(stat)) redstoneUsed += value;
+                        }
+
+                        if (stat.endsWith("_one_cm")) {
+                            distanceCm += value;
+                        } else if (stat.equals("minecraft:damage_taken")) {
+                            damageTaken += value;
+                        } else if (stat.equals("minecraft:damage_dealt")) {
+                            damageDealt += value;
+                        } else if (stat.equals("minecraft:mob_kills")) {
+                            mobKills += value;
+                            addGeneralStat(filteredCategory, playerName, "mob_kills", value);
+                        } else if (stat.equals("minecraft:player_kills") || 
+                                   stat.equals("minecraft:deaths") || 
+                                   stat.equals("minecraft:sleep_in_bed") || 
+                                   stat.equals("minecraft:talked_to_villager") || 
+                                   stat.equals("minecraft:totem_of_undying") || 
+                                   stat.equals("minecraft:silverfish") || 
+                                   stat.equals("minecraft:wither") || 
+                                   stat.equals("minecraft:ender_dragon") || 
+                                   stat.contains("dragon_fish")) {
+                            
+                            String key = stat.replace("minecraft:", "").replace("tide:", "");
+                            if (key.contains("dragon_fish")) key = "dragon_fish";
+                            addGeneralStat(filteredCategory, playerName, key, value);
+                        }
+                    }
+                    reader.endObject();
+                }
+                reader.endObject();
+            } else {
+                reader.skipValue();
+            }
+        }
+        if (distanceCm > 0) {
+            addGeneralStat(filteredCategory, playerName, "distance_traveled_raw_cm", (int)distanceCm);
+            addGeneralStat(filteredCategory, playerName, "distance_traveled_km", (int)(distanceCm / 100000L));
+        }
+        if (damageDealt > 0) {
+            addGeneralStat(filteredCategory, playerName, "damage_dealt_hearts", damageDealt / 10);
+        }
+        if (totalMined > 0) {
+            addGeneralStat(filteredCategory, playerName, "total_blocks_broken", totalMined);
+        }
+        if (totalUsed > 0) {
+            addGeneralStat(filteredCategory, playerName, "total_blocks_placed", totalUsed);
+        }
+        if (redstoneUsed > 0) {
+            addGeneralStat(filteredCategory, playerName, "redstone_used_raw", redstoneUsed);
+        }
+
+        reader.endObject();
+    }
+
+    private void calculateAndInjectPlaystyleScores(Map<String, Map<String, Map<String, Integer>>> result, Map<String, String> playerToUuid, Path worldDir) {
+        Map<String, Map<String, Integer>> general = result.get("general");
+        if (general == null) return;
+
+        Map<String, Integer> distRaw = general.get("distance_traveled_raw_cm");
+        Map<String, Integer> blocksPlaced = general.get("total_blocks_placed");
+        Map<String, Integer> blocksBroken = general.get("total_blocks_broken");
+        Map<String, Integer> mobKills = general.get("mob_kills");
+        Map<String, Integer> damageHearts = general.get("damage_dealt_hearts");
+        Map<String, Integer> redstoneRaw = general.get("redstone_used_raw");
+
+        Set<String> allPlayers = new HashSet<>();
+        if (distRaw != null) allPlayers.addAll(distRaw.keySet());
+        if (blocksPlaced != null) allPlayers.addAll(blocksPlaced.keySet());
+        if (blocksBroken != null) allPlayers.addAll(blocksBroken.keySet());
+        if (mobKills != null) allPlayers.addAll(mobKills.keySet());
+        if (damageHearts != null) allPlayers.addAll(damageHearts.keySet());
+        if (redstoneRaw != null) allPlayers.addAll(redstoneRaw.keySet());
+
+        for (String player : allPlayers) {
+            String uuid = playerToUuid.get(player);
+            File advFile = worldDir.resolve("advancements").resolve(uuid + ".json").toFile();
+            int[] advBonuses = getAdvancementBonus(advFile);
+
+            long distKm = (distRaw != null && distRaw.containsKey(player)) ? (distRaw.get(player) / 100000L) : 0L;
+            int placed = (blocksPlaced != null) ? blocksPlaced.getOrDefault(player, 0) : 0;
+            int broken = (blocksBroken != null) ? blocksBroken.getOrDefault(player, 0) : 0;
+            int kills = (mobKills != null) ? mobKills.getOrDefault(player, 0) : 0;
+            int hearts = (damageHearts != null) ? damageHearts.getOrDefault(player, 0) : 0;
+            int rsUsed = (redstoneRaw != null) ? redstoneRaw.getOrDefault(player, 0) : 0;
+
+            // Explorer (5000km cap)
+            double expBase = Math.min(100.0, (distKm / 5000.0) * 100.0);
+            int expFinal = (int) Math.min(100, Math.max(5, expBase + Math.min(30, advBonuses[0])));
+
+            // Builder (500,000 action cap)
+            double bldBase = Math.min(100.0, ((placed + broken / 4.0) / 500000.0) * 100.0);
+            int bldFinal = (int) Math.min(100, Math.max(5, bldBase + Math.min(30, advBonuses[1])));
+
+            // Fighter (150,000 combat cap)
+            double fgtBase = Math.min(100.0, ((kills + hearts / 10.0) / 150000.0) * 100.0);
+            int fgtFinal = (int) Math.min(100, Math.max(5, fgtBase + Math.min(30, advBonuses[2])));
+
+            // Redstoner (7,500 interaction cap)
+            double redBase = Math.min(100.0, (rsUsed / 7500.0) * 100.0);
+            int redFinal = (int) Math.min(100, Math.max(5, redBase + Math.min(30, advBonuses[3])));
+
+            addGeneralStat(general, player, "playstyle_explorer", expFinal);
+            addGeneralStat(general, player, "playstyle_builder", bldFinal);
+            addGeneralStat(general, player, "playstyle_fighter", fgtFinal);
+            addGeneralStat(general, player, "playstyle_redstoner", redFinal);
+        }
+    }
+
+    private int[] getAdvancementBonus(File advFile) {
+        int[] bonuses = new int[4];
+        if (advFile == null || !advFile.exists()) return bonuses;
+
+        try (JsonReader reader = new JsonReader(new FileReader(advFile))) {
+            reader.beginObject();
+            while (reader.hasNext()) {
+                String advId = reader.nextName().toLowerCase();
+                reader.beginObject();
+                boolean done = false;
+                while (reader.hasNext()) {
+                    String key = reader.nextName();
+                    if ("done".equals(key)) {
+                        done = reader.nextBoolean();
+                    } else {
+                        reader.skipValue();
+                    }
+                }
+                reader.endObject();
+
+                if (done) {
+                    if (containsAny(advId, "explore", "discover", "travel", "biome", "adventure")) bonuses[0] += 5;
+                    if (containsAny(advId, "build", "construct", "place", "craft")) bonuses[1] += 5;
+                    if (containsAny(advId, "kill", "slay", "monster", "combat", "boss")) bonuses[2] += 5;
+                    if (containsAny(advId, "redstone", "machine", "circuit", "automation")) bonuses[3] += 5;
+                }
+            }
+            reader.endObject();
+        } catch (Exception e) {
+            // malformed or empty advancement file
+        }
+        return bonuses;
+    }
+
+    private boolean containsAny(String str, String... keywords) {
+        for (String k : keywords) {
+            if (str.contains(k)) return true;
+        }
+        return false;
+    }
+
+    private void addGeneralStat(Map<String, Map<String, Integer>> filteredCategory, String playerName, String key, int value) {
+        Map<String, Integer> statMap = filteredCategory.computeIfAbsent(key, k -> new HashMap<>());
+        statMap.merge(playerName, value, Integer::sum);
+    }
+
+    private boolean isRedstone(String stat) {
+        String id = stat.replace("minecraft:", "");
+        for (String rs : DashboardConfig.get().redstone_items) {
+            if (stat.contains(rs)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void streamPlayerStats(String username, UuidCache uuidCache, Path statsDir, OutputStream out) throws IOException {
@@ -83,47 +290,16 @@ public class StatsAggregator {
 
         Path file = dir.resolve(uuid.get() + ".json");
         if (!Files.exists(file)) {
-            throw new FileNotFoundException(type + " file not found for player: " + username);
+            throw new FileNotFoundException("No " + type + " for: " + username);
         }
-        Files.copy(file, out);
-    }
 
-    private double parseStatValue(JsonReader reader, String target) throws IOException {
-        String[] parts = target.split(":");
-        if (parts.length < 2) return 0;
-        
-        String category = "minecraft:" + parts[0];
-        String stat = "minecraft:" + parts[1];
-
-        reader.beginObject();
-        while (reader.hasNext()) {
-            if (reader.nextName().equals("stats")) {
-                reader.beginObject();
-                while (reader.hasNext()) {
-                    if (reader.nextName().equals(category)) {
-                        reader.beginObject();
-                        while (reader.hasNext()) {
-                            if (reader.nextName().equals(stat)) {
-                                double val = reader.nextDouble();
-                                reader.endObject();
-                                reader.endObject();
-                                reader.endObject();
-                                return val;
-                            } else {
-                                reader.skipValue();
-                            }
-                        }
-                        reader.endObject();
-                    } else {
-                        reader.skipValue();
-                    }
-                }
-                reader.endObject();
-            } else {
-                reader.skipValue();
+        // Act as a pure pipe
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
             }
         }
-        reader.endObject();
-        return 0;
     }
 }
