@@ -3,6 +3,8 @@
 ## Overview
 This project provides a comprehensive activity dashboard for Minecraft servers. Built as a Java Fabric mod, it tracks player join and leave events, aggregates in-game statistics, and provides real-time performance monitoring via an interactive dashboard served directly from the server—no external web servers or databases required.
 
+![Dashboard Overview](/docs/images/01_activity_heatmap.png)
+
 ## How It Works
 The mod features an embedded lightweight HTTP server that runs quietly in the background of your Minecraft server. It automatically parses your server's log files (including compressed `.log.gz` archives) to calculate player session times and caches this data in a JSON file. When you visit the dashboard, the embedded server delivers a modern HTML/JS interface alongside the cached data, ensuring virtually zero impact on server performance.
 
@@ -14,10 +16,20 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Interactive Day Details**: Click any day to see a detailed player breakdown, including a pie chart of playtime distribution and an hourly activity graph.
 *   **Deep Linking**: Navigate directly from a player's profile to their busiest day in history.
 
+| Day Breakdown (Pie Chart) | Hourly Activity Timeline |
+| :---: | :---: |
+| ![](/docs/images/02_day_breakdown.png) | ![](/docs/images/03_hourly_activity.png) |
+
+*Full player rankings with session averages, longest sessions, and live online indicators:*
+
+![Player Rankings Table](/docs/images/04_player_table.png)
+
 ### \ud83d\udd0d Global Player Search
 *   **Omni-Search**: Quickly find any player across the entire server history from the main header.
 *   **Shortcut Support**: Access the search bar instantly using `Ctrl+K` (or `Cmd+K` on Mac).
 *   **Instant Drill-Down**: Selecting a player from the search results opens their full profile modal with 3D skin and session analytics.
+
+![Omni-Search (Ctrl+K)](/docs/images/11_omni_search.png)
 
 ### \ud83c\udfc6 Global Leaderboards
 *   **Automatic Aggregation**: The mod scans Minecraft world stats to build leaderboards for:
@@ -27,10 +39,17 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
     *   Special stats like Totems Used, Event Points, and more.
 *   **Interactive Sorting**: Search and sort leaderboards by any metric and click players to view their full activity profile.
 
+![Global Leaderboards](/docs/images/05_leaderboards.png)
+
 ### \ud83d\udc64 Intelligent Player Profiles
 *   **3D Skin Viewer**: Real-time 3D player model rendering with walking animations.
 *   **Session Analytics**: View total playtime, session counts, average session length, and the elusive "Longest Session."
 *   **Status Indicators**: Visual indicators representing online/offline status natively integrated throughout the dashboard profiles.
+*   **Playstyle Analysis**: Radar chart classifying playstyles into Explorer, Builder, Fighter, and Redstoner based on logged stats and advancements.
+
+| 3D Skin & Session Analytics | In-Game Stats Breakdown | Playstyle Radar Chart |
+| :---: | :---: | :---: |
+| ![](/docs/images/06_player_profile_playtime.png) | ![](/docs/images/07_player_profile_ingame_stats.png) | ![](/docs/images/08_playstyle_radar.png) |
 
 ### \ud83d\uddfa\ufe0f Live Dynmap Integration
 *   **Embedded World Map**: View your live [Dynmap](https://www.curseforge.com/minecraft/mc-mods/dynmap) directly inside the dashboard.
@@ -44,6 +63,8 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Header KPI Widget**: Monitor players, TPS, and MSPT instantly from the main header, regardless of which tab you are currently viewing.
 *   **Color-Coded Status**: Visual health indicators (Green/Yellow/Red) for at-a-glance monitoring.
 
+![Live Server Performance](/docs/images/10_live_performance.png)
+
 ### \ud83c\udf96\ufe0f Server Events & Competitions
 *   **Multiple Concurrent Events**: Run multiple competitions simultaneously (e.g., "Mega Mining Mayhem" and "Playtime Challenge").
 *   **Admin-Driven Events**: Create timed competitions using `/dashboard event create`. Supported types: `playtime`, `mob_kills`, `blocks_placed`, `blocks_mined`, `fewest_deaths`, `damage_dealt`, `player_kills`, `fish_caught`, `daily_streak`, `obsidian_placed`, and `obsidian_mined`.
@@ -55,6 +76,8 @@ The mod features an embedded lightweight HTTP server that runs quietly in the ba
 *   **Player Head Rendering**: Native rendering of player heads on the sidebar using a dynamic resource pack.
 *   **Web Leaderboard**: A dedicated "Events" tab on the dashboard with individual cards for each active event, live timers, and interactive leaderboards.
 *   **Automatic Rewards**: Earn "All-Time Points" for top placements, tracked on a permanent server-wide leaderboard.
+
+![Server Events & Competitions](/docs/images/09_server_events.png)
 
 ### \ud83d\udd25 Daily Playtime Streaks
 *   **Activity Milestones**: Automatically tracks players who reach 60 minutes of playtime in a calendar day.
